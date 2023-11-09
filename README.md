@@ -11,8 +11,8 @@ A versatile bash script to monitor various system resources and alert via Telegr
 - **Comprehensive Monitoring**: Monitors CPU, RAM, Disk, and CPU temperature with user-defined thresholds.
 - **SSH Session Monitoring**: Monitors new SSH login sessions with the ability to exclude IPs or IP ranges.
 - **Maintenance Mode**: Utilizes a lock file that can be controlled from other scripts to prevent alerts during maintenance.
-- **CLI Feedback**: Provides status and notifications in the command-line interface (CLI).
 - **Reboot Detection**: Notifies when the server has been rebooted.
+- **CLI Feedback**: Provides status and notifications in the command-line interface (CLI).
 
 ## Usage
 
