@@ -148,7 +148,9 @@ Don't forget to give the project a star! Thanks again!
 
 Distributed under the MIT License. See `LICENSE` for more information.
 
-## Contact
+## Author
+
+I write loops to skip out on life's hoops.
 
 Russell Grapes - [www.grapes.team](https://grapes.team)
 
