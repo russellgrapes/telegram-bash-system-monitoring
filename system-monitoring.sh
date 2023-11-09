@@ -507,64 +507,43 @@ monitor_ssh_logins() {
     done
 }
 
-# The `parse_arguments` function processes the command-line arguments for the script.
-# It allows setting custom thresholds for CPU, RAM, Disk, Temperature, and Load Averages.
-# Unspecified Load Average thresholds default to core-count-based calculations.
+# `parse_arguments` processes command-line arguments, enabling custom thresholds for system metrics.
+# It assigns thresholds for CPU, RAM, Disk, and Temperature. Load Averages default to core-count ratios
+# if unspecified, ensuring automatic, hardware-appropriate limits.
 parse_arguments() {
+    # Loop through all command-line arguments
     while [[ "$#" -gt 0 ]]; do
         case $1 in
             --NAME)
-                # Set custom host name for monitoring alerts
+                # Check if a server name is provided after --NAME
+                if [[ -z "$2" || "$2" == --* ]]; then
+                    echo "Error: --NAME must be followed by a server name."
+                    exit 1
+                fi
                 HOST_NAME="$2"
                 shift 2  # Move past the argument and its value
                 ;;
-            --CPU)
-                # Set CPU usage threshold for alerts
-                CPU_THRESHOLD="$2"
-                shift 2  # Move past the argument and its value
-                ;;
-            --RAM)
-                # Set RAM usage threshold for alerts
-                RAM_THRESHOLD="$2"
-                shift 2  # Move past the argument and its value
-                ;;
-            --DISK)
-                # Set Disk usage threshold for alerts
-                DISK_THRESHOLD="$2"
-                shift 2  # Move past the argument and its value
-                ;;
-            --TEMP)
-                # Set CPU temperature threshold for alerts
-                TEMP_THRESHOLD="$2"
-                shift 2  # Move past the argument and its value
-                ;;
-            --LA1)
-                # Set or mark 1-minute Load Average threshold
-                if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-                    LA1_THRESHOLD="$2"
-                    shift 2  # Move past the argument and its value
-                else
-                    LA1_THRESHOLD="default"  # No value provided, use default
-                    shift  # Move past the argument
+            --CPU|--RAM|--DISK|--TEMP)
+                # Check if a numeric threshold is provided after the key
+                if [[ -z "$2" || "$2" == --* ]]; then
+                    echo "Error: $1 must be followed by a threshold value."
+                    exit 1
                 fi
+                # Create a reference to the respective threshold variable
+                declare -n threshold_var="${1#--}_THRESHOLD"
+                threshold_var="$2"
+                shift 2  # Move past the argument and its value
                 ;;
-            --LA5)
-                # Set or mark 5-minute Load Average threshold
+            --LA1|--LA5|--LA15)
+                # Check if a value is provided for Load Average thresholds
                 if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-                    LA5_THRESHOLD="$2"
+                    declare -n threshold_var="${1#--}_THRESHOLD"
+                    threshold_var="$2"
                     shift 2  # Move past the argument and its value
                 else
-                    LA5_THRESHOLD="default"  # No value provided, use default
-                    shift  # Move past the argument
-                fi
-                ;;
-            --LA15)
-                # Set or mark 15-minute Load Average threshold
-                if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-                    LA15_THRESHOLD="$2"
-                    shift 2  # Move past the argument and its value
-                else
-                    LA15_THRESHOLD="default"  # No value provided, use default
+                    # If no value is provided, use a default value
+                    declare -n threshold_var="${1#--}_THRESHOLD"
+                    threshold_var="default"  # No value provided, use default
                     shift  # Move past the argument
                 fi
                 ;;
@@ -629,6 +608,10 @@ validate_thresholds() {
     # Check if SSH login monitoring is enabled.
     [[ -n "$SSH_LOGIN_MONITORING" ]] && echo "SSH Login Monitoring: Enabled"
 
+    # Check for required software
+    echo ""
+    check_required_software
+
     echo ""
     echo "Notifications: "
 
@@ -655,9 +638,6 @@ if [ "$#" -eq 0 ]; then
     print_help
     exit 0
 fi
-
-# Check for required software
-check_required_software
 
 # Call the parse_arguments function to process command-line arguments
 parse_arguments "$@"
