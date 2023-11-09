@@ -15,19 +15,19 @@ A versatile bash script to monitor various system resources and alert via Telegr
 
 ## Usage
 
-The script supports the following keys for command-line usage:
+The `system-monitoring.sh` script offers various command-line options for monitoring system resources:
 
-- `--NAME [ServerName]`: Set server name from witch notifications will be sent. Usfull when you have diffrent server. 
-- `--CPU [threshold]`: Set a CPU usage threshold in %.
-- `--RAM [threshold]`: Set a RAM usage threshold in %.
-- `--DISK [threshold]`: Set a Disk usage threshold in %.
-- `--TEMP [threshold]`: Set a CPU temperature threshold in %.
-- `--LA1 [threshold]`: Set a 1-minute Load Average threshold in LA format. If no threshold is provided, an auto-threshold based on the hardware will be used.
-- `--LA5 [threshold]`: Set a 5-minute Load Average threshold in LA format. If no threshold is provided, 75% of the number of CPU cores is used as an auto-threshold.
-- `--LA15 [threshold]`: Set a 15-minute Load Average threshold in LA format. If no threshold is provided, 50% of the number of CPU cores is used as an auto-threshold.
-- `--SSH-LOGIN`: Monitor SSH logins and alert for new sessions not originating from excluded IPs or IP ranges.
+- `--NAME [ServerName]`: Assign a custom name to the server to distinguish notifications from different servers.
+- `--CPU [threshold]`: Set a CPU usage alert threshold as a percentage (%).
+- `--RAM [threshold]`: Set a RAM usage alert threshold as a percentage (%).
+- `--DISK [threshold]`: Set a disk usage alert threshold as a percentage (%).
+- `--TEMP [threshold]`: Set a CPU temperature alert threshold in degrees Celsius (°C).
+- `--LA1 [threshold]`: Set a threshold for 1-minute Load Average. Without a specified threshold, the script uses an auto-threshold based on the hardware.
+- `--LA5 [threshold]`: Set a threshold for 5-minute Load Average. If omitted, the script defaults to an auto-threshold of 75% of the CPU cores.
+- `--LA15 [threshold]`: Set a threshold for 15-minute Load Average. If omitted, the script defaults to an auto-threshold of 50% of the CPU cores.
+- `--SSH-LOGIN`: Enable monitoring of SSH login activity, issuing alerts for any new sessions that do not match the specified excluded IPs or IP ranges.
 
-*When the threshold is exceeded, the script sends a message to Telegram.
+*Alerts are sent to Telegram when thresholds are exceeded.
 
 ## Configuration
 
@@ -45,6 +45,16 @@ The script can be configured via the following environment variables in the scri
 
 Follow these steps to install and set up the system-monitoring.sh script on your server.
 
+## Install Required Packages
+
+Install the main required packages:
+
+```bash
+sudo apt-get install bc ipcalc curl
+```
+
+Note: The script will check for any additional required packages during runtime and will notify you if any are missing.
+
 ## Download Script
 
 Download the script directly using `curl`:
@@ -52,16 +62,6 @@ Download the script directly using `curl`:
 ```bash
 curl -O https://raw.githubusercontent.com/russellgrapes/telegram-bash-system-monitoring/main/system-monitoring.sh
 ```
-
-## Install Required Packages
-
-Install the main required packages:
-
-```bash
-sudo apt-get install bc ipcalc awk
-```
-
-Note: The script will check for any additional required packages during runtime and will notify you if any are missing.
 
 ## Make the Script Executable
 
