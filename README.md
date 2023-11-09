@@ -12,6 +12,7 @@ A versatile bash script to monitor various system resources and alert via Telegr
 - **Comprehensive Monitoring**: Monitors CPU, RAM, Disk, and CPU temperature with user-defined thresholds.
 - **SSH Session Monitoring**: Monitors new SSH login sessions with the ability to exclude IPs or IP ranges.
 - **Maintenance Mode**: Utilizes a lock file that can be controlled from other scripts to prevent alerts during maintenance.
+- **Fast and Slow Monitoring Intervals**: Separates metrics into fast and slow checks for tailored alert responsiveness.
 - **CLI Feedback**: Provides status and notifications in the command-line interface (CLI).
 
 ## Usage
@@ -41,10 +42,10 @@ The script can be configured via the following environment variables in the scri
 - `TELEGRAMM_LOCK_STATE`: The file path for the lock state file that controls alert messaging.
 - `SSH_ACTIVITY_LOGINS`: The file path where the script logs current SSH session logins.
 - `SSH_ACTIVITY_EXCLUDED_IPS`: A list of IP addresses or CIDR ranges excluded from SSH login alerts.
-- `RESOURCE_CHECK_INTERVAL`: The interval, in seconds, between system resource checks.
-- `SSH_CHECK_INTERVAL`: The interval, in seconds, between SSH login checks.
 - `LAST_BOOT_TIME_FILE`: The file path for logging the last system boot time, used by the --REBOOT option.
 - `HOST_NAME`: An default identifier for the server that also can be set via the --NAME command-line option.
+- `FAST_CHECK_INTERVAL`: The interval, in seconds, at which the script performs fast checks for rapid-response metrics (CPU, RAM, SSH logins and 1-minute Load Average).
+- `SLOW_CHECK_INTERVAL`: The interval, in seconds, at which the script performs slow checks for metrics that do not require immediate action (Disk Usage, CPU Temperature, Reboot monitoring and longer Load Averages).
 
 # Telegram System Monitoring Installation
 
