@@ -157,7 +157,7 @@ send_telegram_alert() {
     local ram_usage=$(free -m | awk 'NR==2{printf "%.2f%%", $3*100/$2 }')
     local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}')
     local num_cores=$(nproc)
-    local cpu_usage=$(awk -v cores="$num_cores" -v load="$load1" 'BEGIN { printf "%.0f", (load * 100) / cores }')
+    local cpu_usage=$(awk -v cores="$num_cores" -v load0="$load1" 'BEGIN { printf "%.0f", (load0 * 100) / cores }')
     local uptime_info=$(uptime -p | sed 's/^up //')  # Human-readable uptime information
 
     # Check if the message should be sent
@@ -368,7 +368,7 @@ check_cpu() {
     local cpu_threshold=$1
     local loadavg=$(awk '{print $1}' /proc/loadavg)  # Get the 1-minute Load Average
     local cores=$(nproc)  # Get the number of processor cores
-    local cpu_usage=$(awk -v cores="$cores" -v load="$loadavg" 'BEGIN { printf "%.0f", (load * 100) / cores }')  # Calculate the CPU usage
+    local cpu_usage=$(awk -v cores="$cores" -v load0="$loadavg" 'BEGIN { printf "%.0f", (load0 * 100) / cores }')  # Calculate the CPU usage
 
 #    echo "Load Average: $loadavg, Cores: $cores, Calculated CPU Usage: $cpu_usage%"  # Debugging output
 
