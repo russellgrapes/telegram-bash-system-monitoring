@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.64
+#    system-monitoring.sh v.3.69
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
