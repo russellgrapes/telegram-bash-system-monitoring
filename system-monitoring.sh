@@ -24,14 +24,11 @@
 
 # Settings
 
-# Global interval variables specify the frequency of monitoring checks.
-# RESOURCE_CHECK_INTERVAL defines the interval in seconds for checking CPU, RAM, Disk, and Temperature.
-# This longer interval prevents frequent alerts for persistent conditions like full disks.
-RESOURCE_CHECK_INTERVAL=900  # Set to 15 minutes (900 seconds) for standard resource checks.
-
-# SSH_CHECK_INTERVAL sets a shorter interval in seconds for detecting new SSH login sessions.
-# Frequent checks ensure prompt notifications of any new SSH activity.
-SSH_CHECK_INTERVAL=30  # Set to 30 seconds for near real-time SSH login monitoring.
+# Configuration variables for check intervals
+# Frequent checks ensure prompt notifications of for urgent resource checks like CPU, RAM, LA1, etc
+FAST_CHECK_INTERVAL=60  # 1 minute in seconds
+# This longer interval prevents frequent alerts for persistent conditions like Disk Usage, CPU Temperature, etc
+SLOW_CHECK_INTERVAL=1800  # 30 minutes in seconds, for less urgent resource checks
 
 # Configuration variables for Telegram alerts in system monitoring.
 # GROUP_ID should be set to the Telegram group ID where alerts will be sent.
@@ -72,7 +69,6 @@ HOST_NAME="Unknown Host"
 
 
 
-
 # Main Code
 
 # Prints usage instructions
@@ -102,8 +98,8 @@ print_help() {
     echo "Variables:"
     echo "  \$GROUP_ID                  Specifies the Telegram group ID for sending alerts."
     echo "  \$BOT_TOKEN                 Specifies the Telegram bot token for authentication."
-    echo "  \$RESOURCE_CHECK_INTERVAL   Defines the interval in seconds between each system resource check."
-    echo "  \$SSH_CHECK_INTERVAL        Defines the interval in seconds between each SSH login check."
+    echo "  \$FAST_CHECK_INTERVAL       Defines the interval in seconds for urgent resource checks (CPU, RAM, and Load Averages)."
+    echo "  \$SLOW_CHECK_INTERVAL       Defines the interval in seconds for less urgent resource checks (Disk Usage, CPU Temperature)."
     echo "  \$SSH_ACTIVITY_EXCLUDED_IPS Lists the array of IP addresses excluded from SSH login alerts."
     echo ""
     echo "Telegram messages are sent based on the lock state defined by the \$TELEGRAMM_LOCK_STATE variable."
@@ -523,26 +519,32 @@ check_reboot() {
 
 # Main Funcions
 
-# Run resource monitoring in the background
-monitor_resources() {
+# Function to perform fast resource checks
+# This function checks CPU usage, RAM usage, and 1-minute and 5-minute Load Averages.
+# These metrics are checked more frequently due to their potential impact on server performance.
+fast_monitor_resources() {
     while true; do
         [[ -n "$CPU_THRESHOLD" ]] && check_cpu "$CPU_THRESHOLD"
         [[ -n "$RAM_THRESHOLD" ]] && check_ram "$RAM_THRESHOLD"
-        [[ -n "$DISK_THRESHOLD" ]] && check_disk "$DISK_THRESHOLD"
-        [[ -n "$TEMP_THRESHOLD" ]] && check_temp "$TEMP_THRESHOLD"
-        [[ -n "$LA1_THRESHOLD" ]] && check_la1
-        [[ -n "$LA5_THRESHOLD" ]] && check_la5
-        [[ -n "$LA15_THRESHOLD" ]] && check_la15
-        [[ -n "$REBOOT_MONITORING" ]] && check_reboot
-        sleep "$RESOURCE_CHECK_INTERVAL"
+        [[ -n "$LA1_THRESHOLD" ]] && check_la1 "$LA1_THRESHOLD"
+        [[ -n "$LA5_THRESHOLD" ]] && check_la5 "$LA5_THRESHOLD"
+        [[ "$SSH_LOGIN_MONITORING" -eq 1 ]] && check_ssh_activity
+        # Sleep for the interval defined by FAST_CHECK_INTERVAL
+        sleep "$FAST_CHECK_INTERVAL"
     done
 }
 
-# Run SSH login activity check in the background
-monitor_ssh_logins() {
+# Function to perform slow resource checks
+# This function checks Disk usage, CPU temperature, and 15-minute Load Average.
+# These metrics are checked less frequently because they are less likely to fluctuate rapidly.
+slow_monitor_resources() {
     while true; do
-        [[ "$SSH_LOGIN_MONITORING" -eq 1 ]] && check_ssh_activity
-        sleep "$SSH_CHECK_INTERVAL"
+        [[ -n "$DISK_THRESHOLD" ]] && check_disk "$DISK_THRESHOLD"
+        [[ -n "$TEMP_THRESHOLD" ]] && check_temp "$TEMP_THRESHOLD"
+        [[ -n "$LA15_THRESHOLD" ]] && check_la15 "$LA15_THRESHOLD"
+        [[ -n "$REBOOT_MONITORING" ]] && check_reboot
+        # Sleep for the interval defined by SLOW_CHECK_INTERVAL
+        sleep "$SLOW_CHECK_INTERVAL"
     done
 }
 
@@ -696,8 +698,8 @@ parse_arguments "$@"
 validate_thresholds
 
 # Start the monitoring functions in the background
-monitor_resources &
-monitor_ssh_logins &
+fast_monitor_resources &
+slow_monitor_resources &
 
 # Wait for background processes to prevent script from exiting
 wait
