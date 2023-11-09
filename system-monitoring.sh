@@ -149,7 +149,7 @@ should_send_message() {
 send_telegram_alert() {
     local alert_type=$1
     local message=$2
-    local time_stamp=$(date "+%H:%M:%S | %b %d %Z")
+    local time_stamp=$(date "+%H:%M:%S | %b %d")
 
     # Gather system metrics
     local load1 load5 load15
