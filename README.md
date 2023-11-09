@@ -76,7 +76,7 @@ chmod +x system-monitoring.sh
 Run the script with the desired thresholds:
 
 ```bash
-./system-monitoring.sh --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
+./system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
 ```
 
 The monitoring script is now ready to use. It will check the specified thresholds and send alerts to your Telegram group when conditions are met. For best practice, consider adding it to your crontab with the reboot option to ensure it runs automatically after each system restart.
@@ -92,7 +92,7 @@ crontab -e
 Add the following line to run the script at reboot:
 
 ```bash
-@reboot /path/to/system-monitoring.sh --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
+@reboot /path/to/system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
 ```
 
 Replace `/path/to/system-monitoring.sh` with the actual path to your script.
