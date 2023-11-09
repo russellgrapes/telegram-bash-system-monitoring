@@ -177,11 +177,11 @@ send_telegram_alert() {
         local formatted_message
         case $alert_type in
             CPU|RAM|DISK|TEMP)
-                formatted_message="*${alert_type}: $message*\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage\nUptime: $uptime_info"
+                formatted_message="*${alert_type}* usage is high: *$message%*\n\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage"
                 ;;
             LA1|LA5|LA15)
                 # For Load Average alerts, message is already prepared
-                formatted_message="$message\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage\nUptime: $uptime_info"
+                formatted_message="*$message*\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage"
                 ;;
             SSH-LOGIN)
                 # For SSH-LOGIN, the message is already formatted
@@ -200,7 +200,7 @@ send_telegram_alert() {
         # Send the formatted message
         local curl_data=(
             --data parse_mode=Markdown
-            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n----------------------------------------\n*Alert:* $formatted_message\n----------------------------------------\nServer IP: $server_ip")"
+            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n----------------------------------------\n$formatted_message\n----------------------------------------\nServer IP: $server_ip\nUptime: $upti>
             --data "chat_id=$GROUP_ID"
         )
 
