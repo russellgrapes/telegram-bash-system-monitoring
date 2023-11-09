@@ -1,4 +1,4 @@
-![alt telegram-bash-system-monitoring](/main/placeholder.png)
+![alt telegram-bash-system-monitoring](https://github.com/russellgrapes/telegram-bash-system-monitoring/blob/main/placeholder.png)
 
 # Telegram Bash Linux System Monitoring
 
