@@ -18,6 +18,7 @@
 
 # For icons in Telegram: ☮⚠ https://www.w3schools.com/charsets/ref_utf_symbols.asp
 
+# Author: https://github.com/russellgrapes/
 
 
 # Settings
