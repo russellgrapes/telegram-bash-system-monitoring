@@ -26,20 +26,24 @@ The `system-monitoring.sh` script offers various command-line options for monito
 - `--LA5 [threshold]`: Set a threshold for 5-minute Load Average. If omitted, the script defaults to an auto-threshold of 75% of the CPU cores.
 - `--LA15 [threshold]`: Set a threshold for 15-minute Load Average. If omitted, the script defaults to an auto-threshold of 50% of the CPU cores.
 - `--SSH-LOGIN`: Enable monitoring of SSH login activity, issuing alerts for any new sessions that do not match the specified excluded IPs or IP ranges.
-
+- `--REBOOT`: Monitor the system for reboots and send a notification upon system restart.
+  
 *Alerts are sent to Telegram when thresholds are exceeded.
 
 ## Configuration
 
 The script can be configured via the following environment variables in the script body:
 
-- `GROUP_ID`: Your Telegram group ID.
-- `BOT_TOKEN`: Your Telegram bot token.
-- `TELEGRAMM_LOCK_STATE`:  Set your lock file path.
-- `SSH_ACTIVITY_LOGINS`: Set your ssh log file path.
-- `SSH_ACTIVITY_EXCLUDED_IPS`: IPs or IP ranges to be excluded from SSH login monitoring.
-- `RESOURCE_CHECK_INTERVAL`: Time interval between resource checks.
-- `SSH_CHECK_INTERVAL`: Time interval between SSH login checks.
+- `GROUP_ID`: Your unique Telegram group/user ID where alerts will be sent.
+- `BOT_TOKEN`: The authentication token for your Telegram bot.
+- `TELEGRAM_API`: The API URL for the Telegram bot, constructed using the BOT_TOKEN.
+- `TELEGRAMM_LOCK_STATE`: The file path for the lock state file that controls alert messaging.
+- `SSH_ACTIVITY_LOGINS`: The file path where the script logs current SSH session logins.
+- `SSH_ACTIVITY_EXCLUDED_IPS`: A list of IP addresses or CIDR ranges excluded from SSH login alerts.
+- `RESOURCE_CHECK_INTERVAL`: The interval, in seconds, between system resource checks.
+- `SSH_CHECK_INTERVAL`: The interval, in seconds, between SSH login checks.
+- `LAST_BOOT_TIME_FILE`: The file path for logging the last system boot time, used by the --REBOOT option.
+- `HOST_NAME`: An default identifier for the server that also can be set via the --NAME command-line option.
 
 # Telegram System Monitoring Installation
 
@@ -76,7 +80,7 @@ chmod +x system-monitoring.sh
 Run the script with the desired thresholds:
 
 ```bash
-./system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
+./system-monitoring.sh --LA1 --LA5 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
 ```
 
 The monitoring script is now ready to use. It will check the specified thresholds and send alerts to your Telegram group when conditions are met. For best practice, consider adding it to your crontab with the reboot option to ensure it runs automatically after each system restart.
@@ -92,7 +96,7 @@ crontab -e
 Add the following line to run the script at reboot:
 
 ```bash
-@reboot /path/to/system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
+@reboot /path/to/system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN --REBOOT
 ```
 
 Replace `/path/to/system-monitoring.sh` with the actual path to your script.
@@ -110,8 +114,6 @@ Find the section labeled `# Settings` and set the main settings:
 - `GROUP_ID`: Your Telegram group ID where alerts will be sent.
 - `BOT_TOKEN`: Your Telegram bot token for authentication.
 - `TELEGRAMM_LOCK_STATE`: Path to the lock state file which controls alert messaging.
-- `SSH_ACTIVITY_LOGINS`: Path to the file storing current SSH login sessions for monitoring.
-- `SSH_ACTIVITY_EXCLUDED_IPS`: Array of IPs or CIDR ranges excluded from SSH login alerts.
 
 For instructions on how to obtain your Telegram `GROUP_ID` and `BOT_TOKEN`, see the section below.
 
