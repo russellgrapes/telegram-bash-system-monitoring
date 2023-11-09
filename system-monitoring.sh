@@ -21,6 +21,7 @@
 # Author: https://github.com/russellgrapes/
 
 
+
 # Settings
 
 # Global interval variables specify the frequency of monitoring checks.
@@ -41,13 +42,19 @@ SSH_CHECK_INTERVAL=30  # Set to 30 seconds for near real-time SSH login monitori
 GROUP_ID="your_telegram_group_id"  # Replace with your actual Telegram group ID
 BOT_TOKEN="your_bot_token"         # Replace with your actual Telegram bot token
 TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
-TELEGRAMM_LOCK_STATE="/path/to/your/telegram_lockfile.state"  # Set your lock file path
+TELEGRAMM_LOCK_STATE="/root/telegram_lockfile.state"  # Set your lock file path
 
 # SSH_ACTIVITY_LOGINS specifies the file path used to keep a record of SSH session logins.
 # When the --SSH-LOGIN option is used, the script uses this file to track new SSH logins by
 # comparing the currently active sessions against the previously recorded state. It then updates
 # the file with the latest login information, providing a log for continuous session monitoring.
 SSH_ACTIVITY_LOGINS="/root/ssh_activity_logins.txt"
+
+# LAST_BOOT_TIME_FILE specifies the file path used to record the last boot time of the server.
+# This file is utilized by the --REBOOT option to determine if the server has rebooted since
+# the last recorded timestamp. The script writes the current boot time to this file during each
+# execution and compares it on subsequent runs to detect a reboot occurrence.
+LAST_BOOT_TIME_FILE="/root/last_boot_time.txt"
 
 # SSH_ACTIVITY_EXCLUDED_IPS is an array that holds IP addresses or CIDR ranges that should be
 # ignored by the --SSH-LOGIN monitoring feature. When specifying this key, the script will not
@@ -84,11 +91,13 @@ print_help() {
     echo "  --LA5 [threshold]           Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
     echo "  --LA15 [threshold]          Sets a custom or 50% CPU cores auto-threshold for the 15-minute Load Average."
     echo "  --SSH-LOGIN                 Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
+    echo "  --REBOOT                    Sends an alert if the server has been rebooted since the last script execution."
     echo "  -h, --help                  Displays this help message."
     echo ""
     echo "Files:"
     echo "  \$SSH_ACTIVITY_LOGINS       Specifies the path to the file storing current SSH login sessions for monitoring."
     echo "  \$TELEGRAMM_LOCK_STATE      Specifies the path to the file that controls the lock state for Telegram notifications."
+    echo "  \$LAST_BOOT_TIME_FILE       Specifies the path to the file that stores the last recorded boot time."
     echo ""
     echo "Variables:"
     echo "  \$GROUP_ID                  Specifies the Telegram group ID for sending alerts."
@@ -105,6 +114,7 @@ print_help() {
     echo "  --LA1 defaults to the number of CPU cores."
     echo "  --LA5 defaults to 75% of the CPU core count."
     echo "  --LA15 defaults to 50% of the CPU core count."
+    echo "The --REBOOT option will alert on server reboots, using the last recorded boot time for comparison."
     echo ""
     echo "Monitoring intervals can be customized by modifying the \$RESOURCE_CHECK_INTERVAL"
     echo "and \$SSH_CHECK_INTERVAL variables within the script."
@@ -113,8 +123,8 @@ print_help() {
     echo "which defines specific IPs that are exempt from login alerts."
     echo ""
     echo "Examples:"
-    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 2 --LA15 --SSH-LOGIN"
-    echo "  $0 --NAME MyServer --TEMP 66 --LA15 --SSH-LOGIN"
+    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 2 --LA15 --SSH-LOGIN --REBOOT"
+    echo "  $0 --NAME MyServer --TEMP 66 --LA15 --SSH-LOGIN --REBOOT"
     echo ""
 }
 
@@ -149,6 +159,7 @@ should_send_message() {
 send_telegram_alert() {
     local alert_type=$1
     local message=$2
+    local server_ip=$(get_server_ip)
     local time_stamp=$(date "+%H:%M:%S | %b %d")
 
     # Gather system metrics
@@ -176,6 +187,10 @@ send_telegram_alert() {
                 # For SSH-LOGIN, the message is already formatted
                 formatted_message="$message"
                 ;;
+            REBOOT)
+                # For REBOOT, the message is already formatted
+                formatted_message="$message"
+                ;;
             *)
                 echo "Unknown alert type: $alert_type"
                 return 1
@@ -185,7 +200,7 @@ send_telegram_alert() {
         # Send the formatted message
         local curl_data=(
             --data parse_mode=Markdown
-            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n---------------------------------------\n$formatted_message")"
+            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n----------------------------------------\n*Alert:* $formatted_message\n----------------------------------------\nServer IP: $server_ip")"
             --data "chat_id=$GROUP_ID"
         )
 
@@ -313,6 +328,12 @@ check_required_software() {
     else
         echo "All required software is installed."
     fi
+}
+
+# Function to get the primary IP address of the server
+get_server_ip() {
+    # This will get the IP address of the server's default route interface
+    ip route get 1.2.3.4 | awk '{print $7; exit}'
 }
 
 
@@ -476,6 +497,23 @@ check_la15() {
     fi
 }
 
+# Function to check if the server has been rebooted since the last check
+check_reboot() {
+    # Get the last boot time using the 'who -b' command and format the output
+    local last_boot_time=$(who -b | awk '{print $3 " " $4}')
+
+    # Read the last saved boot time from the file
+    local last_saved_boot_time=$(cat "$LAST_BOOT_TIME_FILE" 2>/dev/null)
+
+    # Compare the current boot time with the last saved boot time
+    if [[ "$last_boot_time" != "$last_saved_boot_time" ]]; then
+        # If they differ, save the new boot time to the file
+        echo "$last_boot_time" > "$LAST_BOOT_TIME_FILE"
+
+        # Send a Telegram alert indicating the server has rebooted
+        send_telegram_alert "REBOOT" "Server rebooted at: $last_boot_time"
+    fi
+}
 
 
 
@@ -495,6 +533,7 @@ monitor_resources() {
         [[ -n "$LA1_THRESHOLD" ]] && check_la1
         [[ -n "$LA5_THRESHOLD" ]] && check_la5
         [[ -n "$LA15_THRESHOLD" ]] && check_la15
+        [[ -n "$REBOOT_MONITORING" ]] && check_reboot
         sleep "$RESOURCE_CHECK_INTERVAL"
     done
 }
@@ -552,6 +591,11 @@ parse_arguments() {
                 SSH_LOGIN_MONITORING=1
                 shift  # Move past the argument
                 ;;
+            --REBOOT)
+                # Enable reboot monitoring
+                REBOOT_MONITORING=1
+                shift  # Move past the argument
+                ;;
             -h|--help)
                 # Display help message and exit
                 print_help
@@ -583,6 +627,15 @@ validate_thresholds() {
     [[ -n "$DISK_THRESHOLD" ]] && echo "Disk Usage Threshold: $DISK_THRESHOLD%"
     [[ -n "$TEMP_THRESHOLD" ]] && echo "CPU Temperature Threshold: $TEMP_THRESHOLD°C"
 
+    # Check if SSH login monitoring is enabled.
+    [[ -n "$SSH_LOGIN_MONITORING" ]] && echo "SSH Login Monitoring: Enabled"
+
+    # Check if reboot monitoring is enabled and display it.
+    if [[ -n "$REBOOT_MONITORING" ]]; then
+        echo "Reboot Monitoring: Enabled"
+        check_reboot  # Perform an initial check at script startup
+    fi
+
     # Handle Load Average thresholds
     if [[ -n "$LA1_THRESHOLD" && "$LA1_THRESHOLD" != "default" ]]; then
         echo "1-minute Load Average Threshold: $LA1_THRESHOLD"
@@ -605,11 +658,8 @@ validate_thresholds() {
         echo "15-minute Load Average Threshold: Using default auto-threshold of $LA15_THRESHOLD (50% of CPU cores)."
     fi
 
-    # Check if SSH login monitoring is enabled.
-    [[ -n "$SSH_LOGIN_MONITORING" ]] && echo "SSH Login Monitoring: Enabled"
-
-    # Check for required software
     echo ""
+    # Check for required software
     check_required_software
 
     echo ""
