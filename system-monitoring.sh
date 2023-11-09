@@ -650,6 +650,12 @@ validate_thresholds() {
 
 # Main code
 
+# If no arguments are passed, print the help message and exit
+if [ "$#" -eq 0 ]; then
+    print_help
+    exit 0
+fi
+
 # Check for required software
 check_required_software
 
