@@ -200,7 +200,7 @@ send_telegram_alert() {
         # Send the formatted message
         local curl_data=(
             --data parse_mode=Markdown
-            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n----------------------------------------\n$formatted_message\n----------------------------------------\nServer IP: $server_ip\nUptime: $upti>
+            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n----------------------------------------\n$formatted_message\n----------------------------------------\nServer IP: $server_ip\nUptime: $uptime_info")"
             --data "chat_id=$GROUP_ID"
         )
 
