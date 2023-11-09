@@ -1,0 +1,666 @@
+#!/bin/bash
+
+#  _________   _________   _________
+# |         | |         | |         |
+# |   six   | |    2    | |   one   |
+# |_________| |_________| |_________|
+#     |||         |||         |||
+# -----------------------------------
+#    system-monitoring.sh v.3.64
+# -----------------------------------
+
+# The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
+# It monitors CPU, RAM, Disk usage, CPU temperature, and Load Averages across different intervals. Designed to be initiated
+# at system startup, it ensures that resource usage is under constant surveillance without the need for scheduled cron jobs.
+
+# To have the script automatically start monitoring when the server boots, add the following line to your crontab:
+# @reboot /path/to/system-monitoring.sh --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 --LA5 --LA15 --SSH-LOGIN
+
+# For icons in Telegram: ☮⚠ https://www.w3schools.com/charsets/ref_utf_symbols.asp
+
+
+
+# Settings
+
+# Global interval variables specify the frequency of monitoring checks.
+# RESOURCE_CHECK_INTERVAL defines the interval in seconds for checking CPU, RAM, Disk, and Temperature.
+# This longer interval prevents frequent alerts for persistent conditions like full disks.
+RESOURCE_CHECK_INTERVAL=900  # Set to 15 minutes (900 seconds) for standard resource checks.
+
+# SSH_CHECK_INTERVAL sets a shorter interval in seconds for detecting new SSH login sessions.
+# Frequent checks ensure prompt notifications of any new SSH activity.
+SSH_CHECK_INTERVAL=30  # Set to 30 seconds for near real-time SSH login monitoring.
+
+# Configuration variables for Telegram alerts in system monitoring.
+# GROUP_ID should be set to the Telegram group ID where alerts will be sent.
+# BOT_TOKEN is the token for the Telegram bot that will send the messages.
+# The TELEGRAM_API constructs the URL endpoint for sending messages via the Telegram bot API.
+# TELEGRAMM_LOCK_STATE is the file that controls the sending of alerts.
+# A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
+GROUP_ID="your_telegram_group_id"  # Replace with your actual Telegram group ID
+BOT_TOKEN="your_bot_token"         # Replace with your actual Telegram bot token
+TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+TELEGRAMM_LOCK_STATE="/path/to/your/telegram_lockfile.state"  # Set your lock file path
+
+# SSH_ACTIVITY_LOGINS specifies the file path used to keep a record of SSH session logins.
+# When the --SSH-LOGIN option is used, the script uses this file to track new SSH logins by
+# comparing the currently active sessions against the previously recorded state. It then updates
+# the file with the latest login information, providing a log for continuous session monitoring.
+SSH_ACTIVITY_LOGINS="/root/ssh_activity_logins.txt"
+
+# SSH_ACTIVITY_EXCLUDED_IPS is an array that holds IP addresses or CIDR ranges that should be
+# ignored by the --SSH-LOGIN monitoring feature. When specifying this key, the script will not
+# send alerts for SSH logins originating from these IPs. Examples of valid entries include:
+# - "192.168.1.1" or "192.168.2.4/32" for individual IP addresses,
+# - "192.168.1.0/24" for all IPs in the range 192.168.1.0 to 192.168.1.255,
+# - "10.10.0.0/16" for all IPs in the range 10.10.0.0 to 10.10.255.255.
+# SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.1" "192.168.2.4/32")
+SSH_ACTIVITY_EXCLUDED_IPS=()
+
+# Default host name if not provided
+HOST_NAME="Unknown Host"
+
+
+
+
+
+
+# Main Code
+
+# Prints usage instructions
+print_help() {
+    echo ""
+    echo "Usage: $0 [options]"
+    echo "Monitors system resources and sends alerts via Telegram if specified thresholds are exceeded."
+    echo ""
+    echo "Options:"
+    echo "  --NAME host_name            Specifies a custom identifier for the host being monitored."
+    echo "  --CPU CPU_%                 Sets the CPU usage percentage threshold for generating an alert."
+    echo "  --RAM RAM_%                 Sets the RAM usage percentage threshold for generating an alert."
+    echo "  --DISK DISK_%               Sets the disk usage percentage threshold for generating an alert."
+    echo "  --TEMP TEMP_°C              Sets the CPU temperature threshold for generating an alert (in Celsius)."
+    echo "  --LA1 [threshold]           Sets a custom or auto-threshold (equal to CPU cores) for the 1-minute Load Average."
+    echo "  --LA5 [threshold]           Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
+    echo "  --LA15 [threshold]          Sets a custom or 50% CPU cores auto-threshold for the 15-minute Load Average."
+    echo "  --SSH-LOGIN                 Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
+    echo "  -h, --help                  Displays this help message."
+    echo ""
+    echo "Files:"
+    echo "  \$SSH_ACTIVITY_LOGINS       Specifies the path to the file storing current SSH login sessions for monitoring."
+    echo "  \$TELEGRAMM_LOCK_STATE      Specifies the path to the file that controls the lock state for Telegram notifications."
+    echo ""
+    echo "Variables:"
+    echo "  \$GROUP_ID                  Specifies the Telegram group ID for sending alerts."
+    echo "  \$BOT_TOKEN                 Specifies the Telegram bot token for authentication."
+    echo "  \$RESOURCE_CHECK_INTERVAL   Defines the interval in seconds between each system resource check."
+    echo "  \$SSH_CHECK_INTERVAL        Defines the interval in seconds between each SSH login check."
+    echo "  \$SSH_ACTIVITY_EXCLUDED_IPS Lists the array of IP addresses excluded from SSH login alerts."
+    echo ""
+    echo "Telegram messages are sent based on the lock state defined by the \$TELEGRAMM_LOCK_STATE variable."
+    echo "If the file's content is '1', messages will not be sent."
+    echo ""
+    echo "The --LA1, --LA5, and --LA15 options enable setting custom Load Average thresholds."
+    echo "If no thresholds are specified, the script applies default values based on the CPU core count:"
+    echo "  --LA1 defaults to the number of CPU cores."
+    echo "  --LA5 defaults to 75% of the CPU core count."
+    echo "  --LA15 defaults to 50% of the CPU core count."
+    echo ""
+    echo "Monitoring intervals can be customized by modifying the \$RESOURCE_CHECK_INTERVAL"
+    echo "and \$SSH_CHECK_INTERVAL variables within the script."
+    echo ""
+    echo "SSH login monitoring is governed by the \$SSH_ACTIVITY_EXCLUDED_IPS variable,"
+    echo "which defines specific IPs that are exempt from login alerts."
+    echo ""
+    echo "Examples:"
+    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 2 --LA15 --SSH-LOGIN"
+    echo "  $0 --NAME MyServer --TEMP 66 --LA15 --SSH-LOGIN"
+    echo ""
+}
+
+
+
+
+
+
+
+
+
+# Telegram functions
+
+# Function to check if messages should be sent based on lock state
+should_send_message() {
+    # Check if the lock file exists and is not empty
+    if [[ ! -f "${TELEGRAMM_LOCK_STATE}" ]] || [[ ! -s "${TELEGRAMM_LOCK_STATE}" ]]; then
+        # Lock file doesn't exist or is empty, send message
+        return 0
+    fi
+
+    # Lock file exists and has content, read the state
+    local state=$(cat "${TELEGRAMM_LOCK_STATE}")
+    # If state is "1", do not send the message
+    [[ "$state" != "1" ]]
+}
+
+# The `send_telegram_alert` function formats and sends alert messages to Telegram. It gathers
+# current system metrics such as Load Averages, CPU, RAM, and Disk usage, formatting them according
+# to the alert type. If the messaging lock is not engaged, it sends the alert with a timestamp
+# and hostname to the specified Telegram group.
+send_telegram_alert() {
+    local alert_type=$1
+    local message=$2
+    local time_stamp=$(date "+%H:%M:%S | %b %d %Z")
+
+    # Gather system metrics
+    local load1 load5 load15
+    read load1 load5 load15 _ <<< $(awk '{print $1, $2, $3}' /proc/loadavg)
+    local ram_usage=$(free -m | awk 'NR==2{printf "%.2f%%", $3*100/$2 }')
+    local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}')
+    local num_cores=$(nproc)
+    local cpu_usage=$(awk -v cores="$num_cores" -v load="$load1" 'BEGIN { printf "%.0f", (load * 100) / cores }')
+    local uptime_info=$(uptime -p | sed 's/^up //')  # Human-readable uptime information
+
+    # Check if the message should be sent
+    if should_send_message; then
+        # Format the message based on the type of alert
+        local formatted_message
+        case $alert_type in
+            CPU|RAM|DISK|TEMP)
+                formatted_message="*${alert_type}: $message*\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage\nUptime: $uptime_info"
+                ;;
+            LA1|LA5|LA15)
+                # For Load Average alerts, message is already prepared
+                formatted_message="$message\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage\nUptime: $uptime_info"
+                ;;
+            SSH-LOGIN)
+                # For SSH-LOGIN, the message is already formatted
+                formatted_message="$message"
+                ;;
+            *)
+                echo "Unknown alert type: $alert_type"
+                return 1
+                ;;
+        esac
+
+        # Send the formatted message
+        local curl_data=(
+            --data parse_mode=Markdown
+            --data "text=$(echo -e "\n⚠  *$HOST_NAME* | $time_stamp  ⚠\n---------------------------------------\n$formatted_message")"
+            --data "chat_id=$GROUP_ID"
+        )
+
+        curl -s "${curl_data[@]}" "$TELEGRAM_API" > /dev/null
+    else
+        echo "Message sending is locked. No alert sent for $alert_type."
+    fi
+}
+
+
+
+
+
+
+
+
+
+# Functions for helping
+
+# Function to check if an IP is within the specified CIDR ranges or is an exact IP match.
+# It supports CIDR notation and exact IPs in the SSH_ACTIVITY_EXCLUDED_IPS array.
+# The function uses bitwise operations to convert IP addresses to their numeric equivalent
+# for an easier range comparison and leverages `ipcalc` for CIDR calculations.
+# Tested with ipcalc -v 0.5
+
+# Usage within the script:
+# Call this function with an IP address to check against the SSH_ACTIVITY_EXCLUDED_IPS array.
+# It will return "true" if the IP is in the range, "false" otherwise.
+check_ip_in_range() {
+    # The IP address to check
+    local ip_to_check=$1
+    # Flag to indicate if a match was found
+    local match_found="false"
+
+    # Converts an IP address to its numeric equivalent using bitwise operations.
+    ip_to_long() {
+        local ip=$1
+        local a b c d
+        # Read the four octets of the IP address
+        IFS='.' read -r a b c d <<< "$ip"
+        # Convert the octets to a numeric value
+        echo $(( (a << 24) + (b << 16) + (c << 8) + d ))
+    }
+
+    # Convert the IP to check into its numeric format
+    local ip_long=$(ip_to_long $ip_to_check)
+
+    # Loop through each range in the exclusion array
+    for range in "${SSH_ACTIVITY_EXCLUDED_IPS[@]}"; do
+        # Handle exact IP addresses or /32 CIDR
+        if [[ $range == *"/32" ]] || [[ $range == *.*.*.* && ! $range == *"/"* ]]; then
+            local range_ip=${range%/*}  # Remove CIDR notation if present
+            local range_long=$(ip_to_long $range_ip)
+            # Direct comparison for single IP addresses
+            if [[ $ip_long -eq $range_long ]]; then
+                match_found="true"
+                break
+            fi
+        else
+            # Handle CIDR ranges
+            # Calculate the min and max of the CIDR range using ipcalc
+            local host_min=$(ipcalc -nb $range | grep 'HostMin' | awk '{print $2}')
+            local host_max=$(ipcalc -nb $range | grep 'HostMax' | awk '{print $2}')
+            local min_long=$(ip_to_long $host_min)
+            local max_long=$(ip_to_long $host_max)
+            # Check if the IP falls within the min and max of the range
+            if [[ $ip_long -ge $min_long && $ip_long -le $max_long ]]; then
+                match_found="true"
+                break
+            fi
+        fi
+    done
+
+    # Output true if the IP is within the range, false otherwise
+    echo "$match_found"
+}
+
+
+# Function to check for necessary software on the system
+check_required_software() {
+    local missing_counter=0
+    local install_cmd=""
+
+    # Detect package manager
+    if command -v apt &> /dev/null; then
+        install_cmd="sudo apt install"
+    elif command -v yum &> /dev/null; then
+        install_cmd="sudo yum install"
+    elif command -v dnf &> /dev/null; then
+        install_cmd="sudo dnf install"
+    else
+        echo "Error: No recognized package manager found (apt, yum, dnf)."
+        exit 1
+    fi
+
+    # List of required commands and their corresponding packages
+    declare -A required_commands=(
+        ["bc"]="bc"
+        ["awk"]="gawk"
+        ["curl"]="curl"
+        ["free"]="procps"
+        ["df"]="coreutils"
+        ["uptime"]="procps"
+        ["nproc"]="coreutils"
+        ["who"]="coreutils"
+        ["ipcalc"]="ipcalc"
+    )
+
+    echo "Checking for required software..."
+
+    for cmd in "${!required_commands[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            echo ""
+            echo "Error: Required command '$cmd' is not installed."
+            echo "To install '$cmd', run: $install_cmd ${required_commands[$cmd]}"
+            ((missing_counter++))
+        fi
+    done
+
+    if [[ missing_counter -ne 0 ]]; then
+        echo ""
+        echo "Error: $missing_counter required commands are missing."
+        echo "Install the missing commands before running this script."
+        exit 1
+    else
+        echo "All required software is installed."
+    fi
+}
+
+
+
+
+
+
+
+
+
+
+
+
+# Monitoring functions
+
+# Function to check for new SSH logins
+# This function monitors for new SSH logins by comparing the current sessions against a saved list.
+# It checks each session's username, IP, date, and time. If a session is not in the saved list
+# and the IP isn't excluded, it sends a Telegram alert with the login details.
+# The function updates the saved list after each check.
+check_ssh_activity() {
+    # Fetch the current SSH sessions
+    local current_logins=$(who | awk '{print $1, $5, $3, $4}')  # Extract username, IP, date, and time
+    local last_logins=$(cat "$SSH_ACTIVITY_LOGINS" 2>/dev/null)
+
+    # Update the saved state with the current SSH sessions
+    echo "$current_logins" > "$SSH_ACTIVITY_LOGINS"
+
+    # Loop through the current logins to identify new sessions
+    while IFS= read -r current_login; do
+        # If the current session is not in the last recorded state, it's new
+        if ! grep -Fq "$current_login" <<< "$last_logins"; then
+            local user=$(echo "$current_login" | awk '{print $1}')
+            local ip=$(echo "$current_login" | awk '{print $2}' | tr -d '()')
+            local login_time=$(echo "$current_login" | awk '{print $3, $4}')
+            local formatted_time=$(date -d "$login_time" +"%H:%M" 2>/dev/null)
+
+            # Check if the IP is within any of the excluded CIDR ranges or exact matches
+            if [[ $(check_ip_in_range "$ip") == "false" ]]; then
+                # Prepare and send the alert message
+                local message="New SSH login: User *[ $user ]* from IP *$ip* at $formatted_time."
+                echo "$message"  # Echo the message to the terminal for logging
+                send_telegram_alert "SSH-LOGIN" "$message"
+            fi
+        fi
+    done <<< "$current_logins"
+}
+
+
+
+# Function to check CPU usage
+check_cpu() {
+    local cpu_threshold=$1
+    local loadavg=$(awk '{print $1}' /proc/loadavg)  # Get the 1-minute Load Average
+    local cores=$(nproc)  # Get the number of processor cores
+    local cpu_usage=$(awk -v cores="$cores" -v load="$loadavg" 'BEGIN { printf "%.0f", (load * 100) / cores }')  # Calculate the CPU usage
+
+#    echo "Load Average: $loadavg, Cores: $cores, Calculated CPU Usage: $cpu_usage%"  # Debugging output
+
+    if [[ "$cpu_usage" -ge "$cpu_threshold" ]]; then
+        echo "CPU usage is high: $cpu_usage%"
+        send_telegram_alert "CPU" "$cpu_usage"
+    fi
+}
+
+
+# Function to check RAM usage
+check_ram() {
+    local ram_threshold=$1
+    local ram_usage=$(free -m | awk 'NR==2{printf "%.2f", $3*100/$2 }')
+
+    # Compare using awk and interpret the result
+    local comparison=$(awk -v usage="$ram_usage" -v threshold="$ram_threshold" 'BEGIN {print (usage >= threshold) ? "1" : "0"}')
+
+    if [ "$comparison" -eq 1 ]; then
+        echo "RAM usage is high: $ram_usage%"
+        send_telegram_alert "RAM" "$ram_usage"
+    fi
+}
+
+
+# Function to check Disk usage
+check_disk() {
+    local disk_threshold=$1
+    local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}' | sed 's/%//')
+
+    if [[ "$disk_usage" -ge "$disk_threshold" ]]; then
+        echo "Disk usage is high: $disk_usage%"
+        send_telegram_alert "DISK" "$disk_usage"
+    fi
+}
+
+
+# Function to check CPU temperature
+# Monitors CPU temperature by reading from the sysfs thermal zone files.
+# If no temperature data is available, it logs an error.
+check_temp() {
+    local temp_threshold=$1
+    local cpu_temp
+    local temp_path
+
+    # Attempt to find a valid temperature file
+    for i in /sys/class/thermal/thermal_zone*/temp; do
+        if [[ -f "$i" ]]; then
+            temp_path="$i"
+            break
+        fi
+    done
+
+    # If a temperature file was found, read the temperature
+    if [[ -n "$temp_path" ]]; then
+        cpu_temp=$(awk '{print int($1/1000)}' "$temp_path")
+    else
+        echo "No thermal zone temp file found. Unable to check CPU temperature."
+        return 1
+    fi
+
+    # Compare the CPU temperature with the threshold
+    if [[ "$cpu_temp" -ge "$temp_threshold" ]]; then
+        echo "CPU temperature is high: $cpu_temp°C"
+        send_telegram_alert "TEMP" "$cpu_temp"
+    fi
+}
+
+
+# Function to check 1-minute Load Average against the threshold
+check_la1() {
+    local la1=$(awk '{print $1}' /proc/loadavg)
+    # If LA1_THRESHOLD is not set, default to the number of CPU cores
+    local la1_threshold=${LA1_THRESHOLD:-$(nproc)}
+
+    if (( $(echo "$la1 >= $la1_threshold" | bc -l) )); then
+        echo "1-minute Load Average is high: $la1"
+        send_telegram_alert "LA1" "$la1"
+    fi
+}
+
+
+# Function to check 5-minute Load Average against the threshold
+check_la5() {
+    local la5=$(awk '{print $2}' /proc/loadavg)
+    # If LA5_THRESHOLD is not set, default to 75% of the number of CPU cores
+    local la5_threshold=${LA5_THRESHOLD:-$(echo "$(nproc) * 0.75" | bc)}
+
+    if (( $(echo "$la5 >= $la5_threshold" | bc -l) )); then
+        echo "5-minute Load Average is high: $la5"
+        send_telegram_alert "LA5" "$la5"
+    fi
+}
+
+
+# Function to check 15-minute Load Average against the threshold
+check_la15() {
+    local la15=$(awk '{print $3}' /proc/loadavg)
+    # If LA15_THRESHOLD is not set, default to 50% of the number of CPU cores
+    local la15_threshold=${LA15_THRESHOLD:-$(echo "$(nproc) * 0.5" | bc)}
+
+    if (( $(echo "$la15 >= $la15_threshold" | bc -l) )); then
+        echo "15-minute Load Average is high: $la15"
+        send_telegram_alert "LA15" "$la15"
+    fi
+}
+
+
+
+
+
+
+
+
+# Main Funcions
+
+# Run resource monitoring in the background
+monitor_resources() {
+    while true; do
+        [[ -n "$CPU_THRESHOLD" ]] && check_cpu "$CPU_THRESHOLD"
+        [[ -n "$RAM_THRESHOLD" ]] && check_ram "$RAM_THRESHOLD"
+        [[ -n "$DISK_THRESHOLD" ]] && check_disk "$DISK_THRESHOLD"
+        [[ -n "$TEMP_THRESHOLD" ]] && check_temp "$TEMP_THRESHOLD"
+        [[ -n "$LA1_THRESHOLD" ]] && check_la1
+        [[ -n "$LA5_THRESHOLD" ]] && check_la5
+        [[ -n "$LA15_THRESHOLD" ]] && check_la15
+        sleep "$RESOURCE_CHECK_INTERVAL"
+    done
+}
+
+# Run SSH login activity check in the background
+monitor_ssh_logins() {
+    while true; do
+        [[ "$SSH_LOGIN_MONITORING" -eq 1 ]] && check_ssh_activity
+        sleep "$SSH_CHECK_INTERVAL"
+    done
+}
+
+# The `parse_arguments` function processes the command-line arguments for the script.
+# It allows setting custom thresholds for CPU, RAM, Disk, Temperature, and Load Averages.
+# Unspecified Load Average thresholds default to core-count-based calculations.
+parse_arguments() {
+    while [[ "$#" -gt 0 ]]; do
+        case $1 in
+            --NAME)
+                # Set custom host name for monitoring alerts
+                HOST_NAME="$2"
+                shift 2  # Move past the argument and its value
+                ;;
+            --CPU)
+                # Set CPU usage threshold for alerts
+                CPU_THRESHOLD="$2"
+                shift 2  # Move past the argument and its value
+                ;;
+            --RAM)
+                # Set RAM usage threshold for alerts
+                RAM_THRESHOLD="$2"
+                shift 2  # Move past the argument and its value
+                ;;
+            --DISK)
+                # Set Disk usage threshold for alerts
+                DISK_THRESHOLD="$2"
+                shift 2  # Move past the argument and its value
+                ;;
+            --TEMP)
+                # Set CPU temperature threshold for alerts
+                TEMP_THRESHOLD="$2"
+                shift 2  # Move past the argument and its value
+                ;;
+            --LA1)
+                # Set or mark 1-minute Load Average threshold
+                if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                    LA1_THRESHOLD="$2"
+                    shift 2  # Move past the argument and its value
+                else
+                    LA1_THRESHOLD="default"  # No value provided, use default
+                    shift  # Move past the argument
+                fi
+                ;;
+            --LA5)
+                # Set or mark 5-minute Load Average threshold
+                if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                    LA5_THRESHOLD="$2"
+                    shift 2  # Move past the argument and its value
+                else
+                    LA5_THRESHOLD="default"  # No value provided, use default
+                    shift  # Move past the argument
+                fi
+                ;;
+            --LA15)
+                # Set or mark 15-minute Load Average threshold
+                if [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                    LA15_THRESHOLD="$2"
+                    shift 2  # Move past the argument and its value
+                else
+                    LA15_THRESHOLD="default"  # No value provided, use default
+                    shift  # Move past the argument
+                fi
+                ;;
+            --SSH-LOGIN)
+                # Enable SSH login monitoring
+                SSH_LOGIN_MONITORING=1
+                shift  # Move past the argument
+                ;;
+            -h|--help)
+                # Display help message and exit
+                print_help
+                exit 0
+                ;;
+            *)
+                # Handle unknown parameters
+                echo "Unknown parameter passed: $1"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# The `validate_thresholds` function verifies that at least one monitoring threshold
+# or feature is set. It displays the configured settings, applying default values for
+# Load Averages if unspecified. If no monitoring conditions are active, it prompts
+# the user with a help message and exits to prevent purposeless execution.
+validate_thresholds() {
+    local default_set=false
+
+    # Inform the user that the monitoring is starting and display the settings being used.
+    echo ""
+    echo "System Monitoring is now running with the following settings:"
+
+    # Check if a CPU|RAM|DISK|TEMP threshold has been set
+    [[ -n "$CPU_THRESHOLD" ]] && echo "CPU Threshold: $CPU_THRESHOLD%"
+    [[ -n "$RAM_THRESHOLD" ]] && echo "RAM Threshold: $RAM_THRESHOLD%"
+    [[ -n "$DISK_THRESHOLD" ]] && echo "Disk Usage Threshold: $DISK_THRESHOLD%"
+    [[ -n "$TEMP_THRESHOLD" ]] && echo "CPU Temperature Threshold: $TEMP_THRESHOLD°C"
+
+    # Handle Load Average thresholds
+    if [[ -n "$LA1_THRESHOLD" && "$LA1_THRESHOLD" != "default" ]]; then
+        echo "1-minute Load Average Threshold: $LA1_THRESHOLD"
+    elif [[ "$LA1_THRESHOLD" == "default" ]]; then
+        LA1_THRESHOLD=$(nproc)  # Set to number of CPU cores by default
+        echo "1-minute Load Average Threshold: Using default auto-threshold of $LA1_THRESHOLD (equal to the number of CPU cores)."
+    fi
+
+    if [[ -n "$LA5_THRESHOLD" && "$LA5_THRESHOLD" != "default" ]]; then
+        echo "5-minute Load Average Threshold: $LA5_THRESHOLD"
+    elif [[ "$LA5_THRESHOLD" == "default" ]]; then
+        LA5_THRESHOLD=$(echo "$(nproc) * 0.75" | bc)  # Set to 75% of CPU cores by default
+        echo "5-minute Load Average Threshold: Using default auto-threshold of $LA5_THRESHOLD (75% of CPU cores)."
+    fi
+
+    if [[ -n "$LA15_THRESHOLD" && "$LA15_THRESHOLD" != "default" ]]; then
+        echo "15-minute Load Average Threshold: $LA15_THRESHOLD"
+    elif [[ "$LA15_THRESHOLD" == "default" ]]; then
+        LA15_THRESHOLD=$(echo "$(nproc) * 0.5" | bc)  # Set to 50% of CPU cores by default
+        echo "15-minute Load Average Threshold: Using default auto-threshold of $LA15_THRESHOLD (50% of CPU cores)."
+    fi
+
+    # Check if SSH login monitoring is enabled.
+    [[ -n "$SSH_LOGIN_MONITORING" ]] && echo "SSH Login Monitoring: Enabled"
+
+    echo ""
+    echo "Notifications: "
+
+    # If no custom thresholds are set and no monitoring features are enabled, exit with an error.
+    if [[ -z "$CPU_THRESHOLD" && -z "$RAM_THRESHOLD" && -z "$DISK_THRESHOLD" && -z "$TEMP_THRESHOLD" && ! $default_set && -z "$SSH_LOGIN_MONITORING" ]]; then
+        echo "Error: No custom thresholds set and no monitoring features enabled."
+        print_help
+        exit 1
+    fi
+}
+
+
+
+
+
+
+
+
+
+# Main code
+
+# Check for required software
+check_required_software
+
+# Call the parse_arguments function to process command-line arguments
+parse_arguments "$@"
+
+# Validate that at least one threshold or monitoring feature is set
+validate_thresholds
+
+# Start the monitoring functions in the background
+monitor_resources &
+monitor_ssh_logins &
+
+# Wait for background processes to prevent script from exiting
+wait
