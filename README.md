@@ -10,7 +10,7 @@ A versatile bash script to monitor various system resources and alert via Telegr
 - **Reboot Detection**: Notifies when the server has been rebooted.
 - **Load Averages**: Allows for user-defined thresholds or auto-generated thresholds based on hardware.
 - **Comprehensive Monitoring**: Monitors CPU, RAM, Disk, and CPU temperature with user-defined thresholds.
-- **SSH Session Monitoring**: Monitors new SSH login sessions with the ability to exclude IPs or IP ranges.
+- **SSH, SFTP Session Monitoring**: Monitors new SSH, SFTP login sessions with the ability to exclude IPs or IP ranges.
 - **Maintenance Mode**: Utilizes a lock file that can be controlled from other scripts to prevent alerts during maintenance.
 - **Fast and Slow Monitoring Intervals**: Separates metrics into fast and slow checks for tailored alert responsiveness.
 - **CLI Feedback**: Provides status and notifications in the command-line interface (CLI).
@@ -28,6 +28,7 @@ The `system-monitoring.sh` script offers various command-line options for monito
 - `--LA5 [threshold]`: Set a threshold for 5-minute Load Average. If omitted, the script defaults to an auto-threshold of 75% of the CPU cores.
 - `--LA15 [threshold]`: Set a threshold for 15-minute Load Average. If omitted, the script defaults to an auto-threshold of 50% of the CPU cores.
 - `--SSH-LOGIN`: Enable monitoring of SSH login activity, issuing alerts for any new sessions that do not match the specified excluded IPs or IP ranges.
+- `--SFTP-MONITOR`: Enable monitoring of SFTP activity, issuing alerts for any new sessions that do not match the specified excluded IPs or IP ranges.
 - `--REBOOT`: Monitor the system for reboots and send a notification upon system restart.
   
 *Alerts are sent to Telegram when thresholds are exceeded.
@@ -41,6 +42,7 @@ The script can be configured via the following environment variables in the scri
 - `TELEGRAM_API`: The API URL for the Telegram bot, constructed using the BOT_TOKEN.
 - `TELEGRAMM_LOCK_STATE`: The file path for the lock state file that controls alert messaging.
 - `SSH_ACTIVITY_LOGINS`: The file path where the script logs current SSH session logins.
+- `SFTP_ACTIVITY_LOGINS`: The file path where the script logs current SFTP session logins.
 - `SSH_ACTIVITY_EXCLUDED_IPS`: A list of IP addresses or CIDR ranges excluded from SSH login alerts.
 - `LAST_BOOT_TIME_FILE`: The file path for logging the last system boot time, used by the --REBOOT option.
 - `HOST_NAME`: An default identifier for the server that also can be set via the --NAME command-line option.
