@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.70
+#    system-monitoring.sh v.3.71
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
@@ -46,6 +46,9 @@ TELEGRAMM_LOCK_STATE="/root/telegram_lockfile.state"  # Set your lock file path
 # comparing the currently active sessions against the previously recorded state. It then updates
 # the file with the latest login information, providing a log for continuous session monitoring.
 SSH_ACTIVITY_LOGINS="/root/ssh_activity_logins.txt"
+
+# SFTP_ACTIVITY_LOGINS specifies the file path used to keep a record of SFTP session details.
+SFTP_ACTIVITY_LOGINS="/root/sftp_activity_logins.txt"
 
 # LAST_BOOT_TIME_FILE specifies the file path used to record the last boot time of the server.
 # This file is utilized by the --REBOOT option to determine if the server has rebooted since
@@ -87,11 +90,13 @@ print_help() {
     echo "  --LA5 [threshold]           Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
     echo "  --LA15 [threshold]          Sets a custom or 50% CPU cores auto-threshold for the 15-minute Load Average."
     echo "  --SSH-LOGIN                 Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
+    echo "  --SFTP-MONITOR              Activates monitoring of SFTP sessions and sends alerts for new sessions from non-excluded IPs."
     echo "  --REBOOT                    Sends an alert if the server has been rebooted since the last script execution."
     echo "  -h, --help                  Displays this help message."
     echo ""
     echo "Files:"
     echo "  \$SSH_ACTIVITY_LOGINS       Specifies the path to the file storing current SSH login sessions for monitoring."
+    echo "  \$SFTP_ACTIVITY_LOGINS      Specifies the path to the file storing current SFTP session details for monitoring."
     echo "  \$TELEGRAMM_LOCK_STATE      Specifies the path to the file that controls the lock state for Telegram notifications."
     echo "  \$LAST_BOOT_TIME_FILE       Specifies the path to the file that stores the last recorded boot time."
     echo ""
@@ -100,7 +105,7 @@ print_help() {
     echo "  \$BOT_TOKEN                 Specifies the Telegram bot token for authentication."
     echo "  \$FAST_CHECK_INTERVAL       Defines the interval in seconds for urgent resource checks (CPU, RAM, and Load Averages)."
     echo "  \$SLOW_CHECK_INTERVAL       Defines the interval in seconds for less urgent resource checks (Disk Usage, CPU Temperature)."
-    echo "  \$SSH_ACTIVITY_EXCLUDED_IPS Lists the array of IP addresses excluded from SSH login alerts."
+    echo "  \$SSH_ACTIVITY_EXCLUDED_IPS Lists the array of IP addresses excluded from SSH & SFTP alerts."
     echo ""
     echo "Telegram messages are sent based on the lock state defined by the \$TELEGRAMM_LOCK_STATE variable."
     echo "If the file's content is '1', messages will not be sent."
@@ -115,7 +120,7 @@ print_help() {
     echo "Monitoring intervals can be customized by modifying the \$RESOURCE_CHECK_INTERVAL"
     echo "and \$SSH_CHECK_INTERVAL variables within the script."
     echo ""
-    echo "SSH login monitoring is governed by the \$SSH_ACTIVITY_EXCLUDED_IPS variable,"
+    echo "SFTP, SSH login monitoring is governed by the \$SSH_ACTIVITY_EXCLUDED_IPS variable,"
     echo "which defines specific IPs that are exempt from login alerts."
     echo ""
     echo "Examples:"
@@ -181,6 +186,10 @@ send_telegram_alert() {
                 ;;
             SSH-LOGIN)
                 # For SSH-LOGIN, the message is already formatted
+                formatted_message="$message"
+                ;;
+           SFTP-MONITOR)
+                # For SFTP-MONITOR, the message is already formatted
                 formatted_message="$message"
                 ;;
             REBOOT)
@@ -303,6 +312,7 @@ check_required_software() {
         ["nproc"]="coreutils"
         ["who"]="coreutils"
         ["ipcalc"]="ipcalc"
+	["ss"]="iproute2"
     )
 
     echo "Checking for required software..."
@@ -373,11 +383,61 @@ check_ssh_activity() {
                 local message="New SSH login: User *[ $user ]* from IP *$ip* at $formatted_time."
                 echo "$message"  # Echo the message to the terminal for logging
                 send_telegram_alert "SSH-LOGIN" "$message"
+            else
+                echo "New SSH login: User *[ $user ]* from IP *$ip*. IP excluded, no alerts send."
             fi
         fi
     done <<< "$current_logins"
 }
 
+
+# Function to check for new SFTP sessions
+# This function monitors active SFTP sessions by comparing the current sessions against a previously saved list.
+# It extracts each session's PID, start time, and associated network connections.
+# If a session is not in the saved list and the source IP isn't excluded based on predefined criteria,
+# it sends a Telegram alert with detailed connection information.
+# After checking, the function updates the saved list with current session details to log new sessions for future comparisons.
+# The goal is to monitor and alert on unauthorized or unexpected SFTP activity from non-excluded IP ranges.
+check_sftp_activity() {
+    # Fetch all PIDs for sftp-server processes along with their start times, parent PIDs, and full command
+    local current_sessions=$(LC_ALL=en_US.UTF-8 ps -eo pid,ppid,lstart,cmd | grep [s]ftp-server | awk '{print $1, $2, $3, $4, $5, $6}')
+
+    # Read the last recorded session details from the log file and remove any leading/trailing whitespace
+    local last_sessions=$(cat "$SFTP_ACTIVITY_LOGINS" 2>/dev/null | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+    # Loop through each current session to check if it's new
+    while IFS= read -r current_session; do
+        # Trim spaces from current session string for accurate comparison
+        local trimmed_session=$(echo "$current_session" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+        # Check if this session is already recorded to avoid duplicates
+        if ! grep -Fq "$trimmed_session" <<< "$last_sessions"; then
+            local pid=$(echo "$trimmed_session" | awk '{print $1}')    # Extract the PID
+            local ppid=$(echo "$trimmed_session" | awk '{print $2}')   # Extract the Parent PID
+	    local raw_date=$(echo "$current_session" | awk '{print $3, $4, $5, $6}') # Extract the full date string as it appears
+            local stime=$(LC_ALL=en_US.UTF-8 date -d "$raw_date" +"%Y-%m-%d %H:%M")  # Format the start time correctly based on extracted raw date
+
+            # Use 'ss' to fetch network connections associated with the PID or its parent
+            local connection_details=$(ss -tnp | grep -E "pid=$pid|pid=$ppid" | awk '{split($4, a, ":"); split($5, b, ":"); if (length(a[1]) > 0 && length(b[1]) > 0) print a[1], "<->", b[1]}')
+
+            # Parse source IP from connection details
+            local src_ip=$(echo "$connection_details" | awk '{print $1}')
+
+            # Check if the IP is within any of the excluded ranges
+            if [[ $(check_ip_in_range "$src_ip") == "false" ]]; then
+                # Check if there are valid network details to report
+                if [ -n "$connection_details" ]; then
+                    local message="New SFTP session from: *${src_ip}*"
+                    echo "$message"  # Output the message to terminal for logging
+                    send_telegram_alert "SFTP-MONITOR" "$message"  # Send the alert message through Telegram
+                    echo "$trimmed_session $stime ${connection_details}" >> "$SFTP_ACTIVITY_LOGINS"
+                fi
+            else
+                echo "New SFTP session from *$src_ip*. IP excluded, no alerts send."
+            fi
+        fi
+    done <<< "$current_sessions"
+}
 
 
 # Function to check CPU usage
@@ -529,6 +589,7 @@ fast_monitor_resources() {
         [[ -n "$LA1_THRESHOLD" ]] && check_la1 "$LA1_THRESHOLD"
         [[ -n "$LA5_THRESHOLD" ]] && check_la5 "$LA5_THRESHOLD"
         [[ "$SSH_LOGIN_MONITORING" -eq 1 ]] && check_ssh_activity
+	[[ "$SFTP_LOGIN_MONITORING" -eq 1 ]] && check_sftp_activity
         # Sleep for the interval defined by FAST_CHECK_INTERVAL
         sleep "$FAST_CHECK_INTERVAL"
     done
@@ -593,6 +654,11 @@ parse_arguments() {
                 SSH_LOGIN_MONITORING=1
                 shift  # Move past the argument
                 ;;
+            --SFTP-MONITOR)
+                # Enable SSH login monitoring
+                SFTP_LOGIN_MONITORING=1
+                shift  # Move past the argument
+                ;;
             --REBOOT)
                 # Enable reboot monitoring
                 REBOOT_MONITORING=1
@@ -632,6 +698,9 @@ validate_thresholds() {
     # Check if SSH login monitoring is enabled.
     [[ -n "$SSH_LOGIN_MONITORING" ]] && echo "SSH Login Monitoring: Enabled"
 
+    # Check if SFTP login monitoring is enabled.
+    [[ -n "$SFTP_LOGIN_MONITORING" ]] && echo "SFTP Login Monitoring: Enabled"
+
     # Check if reboot monitoring is enabled and display it.
     if [[ -n "$REBOOT_MONITORING" ]]; then
         echo "Reboot Monitoring: Enabled"
@@ -668,7 +737,7 @@ validate_thresholds() {
     echo "Notifications: "
 
     # If no custom thresholds are set and no monitoring features are enabled, exit with an error.
-    if [[ -z "$CPU_THRESHOLD" && -z "$RAM_THRESHOLD" && -z "$DISK_THRESHOLD" && -z "$TEMP_THRESHOLD" && ! $default_set && -z "$SSH_LOGIN_MONITORING" ]]; then
+    if [[ -z "$CPU_THRESHOLD" && -z "$RAM_THRESHOLD" && -z "$DISK_THRESHOLD" && -z "$TEMP_THRESHOLD" && ! $default_set && -z "$SSH_LOGIN_MONITORING" && -z "$SFTP_LOGIN_MONITORING" ]]; then
         echo "Error: No custom thresholds set and no monitoring features enabled."
         print_help
         exit 1
