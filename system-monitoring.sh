@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.71
+#    system-monitoring.sh v.3.74
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
@@ -161,7 +161,7 @@ send_telegram_alert() {
     local alert_type=$1
     local message=$2
     local server_ip=$(get_server_ip)
-    local time_stamp=$(date "+%H:%M:%S | %b %d")
+    local time_stamp=$(LC_ALL=C date "+%H:%M:%S | %b %d")
 
     # Gather system metrics
     local load1 load5 load15
@@ -362,7 +362,7 @@ get_server_ip() {
 # The function updates the saved list after each check.
 check_ssh_activity() {
     # Fetch the current SSH sessions
-    local current_logins=$(LC_ALL=en_US.UTF-8 who | awk '{print $1, $5, $3, $4}') # Extract username, IP, date, and time
+    local current_logins=$(LC_ALL=C who -s | awk '{print $1, $6, $3, $4, $5}') # Extract username, IP, date, and time
     local last_logins=$(cat "$SSH_ACTIVITY_LOGINS" 2>/dev/null)
 
     # Update the saved state with the current SSH sessions
@@ -374,8 +374,8 @@ check_ssh_activity() {
         if ! grep -Fq "$current_login" <<< "$last_logins"; then
             local user=$(echo "$current_login" | awk '{print $1}')
             local ip=$(echo "$current_login" | awk '{print $2}' | tr -d '()')
-            local login_time=$(echo "$current_login" | awk '{print $3, $4}')
-            local formatted_time=$(date -d "$login_time" +"%H:%M" 2>/dev/null)
+            local login_time=$(echo "$current_login" | awk '{print $3, $4, $5}')
+            local formatted_time=$(LC_ALL=C date -d "$login_time" +"%H:%M" 2>/dev/null)
 
             # Check if the IP is within any of the excluded CIDR ranges or exact matches
             if [[ $(check_ip_in_range "$ip") == "false" ]]; then
@@ -400,7 +400,7 @@ check_ssh_activity() {
 # The goal is to monitor and alert on unauthorized or unexpected SFTP activity from non-excluded IP ranges.
 check_sftp_activity() {
     # Fetch all PIDs for sftp-server processes along with their start times, parent PIDs, and full command
-    local current_sessions=$(LC_ALL=en_US.UTF-8 ps -eo pid,ppid,lstart,cmd | grep [s]ftp-server | awk '{print $1, $2, $3, $4, $5, $6}')
+    local current_sessions=$(LC_ALL=C ps -eo pid,ppid,lstart,cmd | grep [s]ftp-server | awk '{print $1, $2, $3, $4, $5, $6}')
 
     # Read the last recorded session details from the log file and remove any leading/trailing whitespace
     local last_sessions=$(cat "$SFTP_ACTIVITY_LOGINS" 2>/dev/null | sed 's/^[ \t]*//;s/[ \t]*$//')
@@ -415,19 +415,21 @@ check_sftp_activity() {
             local pid=$(echo "$trimmed_session" | awk '{print $1}')    # Extract the PID
             local ppid=$(echo "$trimmed_session" | awk '{print $2}')   # Extract the Parent PID
 	    local raw_date=$(echo "$current_session" | awk '{print $3, $4, $5, $6}') # Extract the full date string as it appears
-            local stime=$(LC_ALL=en_US.UTF-8 date -d "$raw_date" +"%Y-%m-%d %H:%M")  # Format the start time correctly based on extracted raw date
+            local stime=$(LC_ALL=C date -d "$raw_date" +"%Y-%m-%d %H:%M")  # Format the start time correctly based on extracted raw date
+            local htime=$(LC_ALL=C date -d "$raw_date" +"%H:%M")  # Format the start time correctly based on extracted raw date
 
             # Use 'ss' to fetch network connections associated with the PID or its parent
             local connection_details=$(ss -tnp | grep -E "pid=$pid|pid=$ppid" | awk '{split($4, a, ":"); split($5, b, ":"); if (length(a[1]) > 0 && length(b[1]) > 0) print a[1], "<->", b[1]}')
 
             # Parse source IP from connection details
-            local src_ip=$(echo "$connection_details" | awk '{print $1}')
+            local src_ip=$(echo "$connection_details" | awk '{print $3}')
 
             # Check if the IP is within any of the excluded ranges
             if [[ $(check_ip_in_range "$src_ip") == "false" ]]; then
                 # Check if there are valid network details to report
                 if [ -n "$connection_details" ]; then
-                    local message="New SFTP session from: *${src_ip}*"
+		    local message="New SFTP session: From IP *${src_ip}* at ${htime}"
+
                     echo "$message"  # Output the message to terminal for logging
                     send_telegram_alert "SFTP-MONITOR" "$message"  # Send the alert message through Telegram
                     echo "$trimmed_session $stime ${connection_details}" >> "$SFTP_ACTIVITY_LOGINS"
@@ -556,7 +558,9 @@ check_la15() {
 # Function to check if the server has been rebooted since the last check
 check_reboot() {
     # Get the last boot time using the 'who -b' command and format the output
-    local last_boot_time=$(who -b | awk '{print $3 " " $4}')
+    local last_boot_time=$(LC_ALL=C who -b | awk '{print $3, $4, $5}')
+#    local last_boot_time=$(who -b | awk '{print $3 " " $4}')
+#    local last_boot_time=$(LC_ALL=C date -d "$(uptime -s)" "+%b %d %H:%M %Y")
 
     # Read the last saved boot time from the file
     local last_saved_boot_time=$(cat "$LAST_BOOT_TIME_FILE" 2>/dev/null)
@@ -567,7 +571,7 @@ check_reboot() {
         echo "$last_boot_time" > "$LAST_BOOT_TIME_FILE"
 
         # Send a Telegram alert indicating the server has rebooted
-        send_telegram_alert "REBOOT" "Server rebooted at: $last_boot_time"
+        send_telegram_alert "REBOOT" "Server rebooted at $last_boot_time"
     fi
 }
 
