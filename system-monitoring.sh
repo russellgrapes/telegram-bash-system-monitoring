@@ -22,24 +22,44 @@
 
 
 
-# Settings
+
+
+
+
+
+
+# Telegram Settings
+
+# GROUP_ID should be set to the Telegram group ID where alerts will be sent.
+# BOT_TOKEN is the token for the Telegram bot that will send the messages.
+GROUP_ID="your_telegram_group_id"  # Replace with your actual Telegram group ID
+BOT_TOKEN="your_bot_token"         # Replace with your actual Telegram bot token
+
+# TELEGRAM_API constructs the URL endpoint for sending messages via the Telegram bot API.
+TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage" # Normally, there's no need to change it.
+
+# TELEGRAMM_LOCK_STATE is the file that controls the sending of alerts.
+# A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
+TELEGRAMM_LOCK_STATE="/root/telegram_lockfile.state"
+
+
+
+
+
+
+
+
+
+# Script Settings
+
+# Default host name if not provided with --NAME key
+HOST_NAME="My Host"
 
 # Configuration variables for check intervals
 # Frequent checks ensure prompt notifications of for urgent resource checks like CPU, RAM, LA1, etc
 FAST_CHECK_INTERVAL=60  # 1 minute in seconds
 # This longer interval prevents frequent alerts for persistent conditions like Disk Usage, CPU Temperature, etc
 SLOW_CHECK_INTERVAL=1800  # 30 minutes in seconds, for less urgent resource checks
-
-# Configuration variables for Telegram alerts in system monitoring.
-# GROUP_ID should be set to the Telegram group ID where alerts will be sent.
-# BOT_TOKEN is the token for the Telegram bot that will send the messages.
-# The TELEGRAM_API constructs the URL endpoint for sending messages via the Telegram bot API.
-# TELEGRAMM_LOCK_STATE is the file that controls the sending of alerts.
-# A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
-GROUP_ID="your_telegram_group_id"  # Replace with your actual Telegram group ID
-BOT_TOKEN="your_bot_token"         # Replace with your actual Telegram bot token
-TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
-TELEGRAMM_LOCK_STATE="/root/telegram_lockfile.state"  # Set your lock file path
 
 # SSH_ACTIVITY_LOGINS specifies the file path used to keep a record of SSH session logins.
 # When the --SSH-LOGIN option is used, the script uses this file to track new SSH logins by
@@ -65,8 +85,9 @@ LAST_BOOT_TIME_FILE="/root/last_boot_time.txt"
 # SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.1" "192.168.2.4/32")
 SSH_ACTIVITY_EXCLUDED_IPS=()
 
-# Default host name if not provided
-HOST_NAME="Unknown Host"
+
+
+
 
 
 
