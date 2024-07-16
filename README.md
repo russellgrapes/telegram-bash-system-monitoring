@@ -99,11 +99,11 @@ crontab -e
 Add the following line to run the script at reboot:
 
 ```bash
-@reboot /path/to/system-monitoring.sh --NAME MyDebian --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN --SFTP-MONITOR --REBOOT
+@reboot /path/to/system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN --SFTP-MONITOR --REBOOT
 
 # Optional monitoring for other mount points
-@reboot /path/to/system-monitoring.sh --NAME MyDebian --DISK 90 --DISK-TARGET /mnt/my_disk1
-@reboot /path/to/system-monitoring.sh --NAME MyDebian --DISK 90 --DISK-TARGET /mnt/my_disk2
+@reboot /path/to/system-monitoring.sh --DISK 90 --DISK-TARGET /mnt/my_disk1
+@reboot /path/to/system-monitoring.sh --DISK 90 --DISK-TARGET /mnt/my_disk2
 ```
 
 Replace `/path/to/system-monitoring.sh` with the actual path to your script.
