@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.75
+#    system-monitoring.sh v.3.76
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
@@ -191,8 +191,17 @@ send_telegram_alert() {
     local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}')
     local num_cores=$(nproc)
     local cpu_usage=$(awk -v cores="$num_cores" -v load0="$load1" 'BEGIN { printf "%.0f", (load0 * 100) / cores }')
-    local uptime_info=$(uptime -p | sed 's/^up //')  # Human-readable uptime information
-
+    
+    # Convert the uptime format to 365d, 16h, 50m
+    local uptime_raw=$(uptime -p | sed 's/^up //')    
+    local formatted_uptime=$(echo "$uptime_raw" | awk ' {
+    for (i = 1; i <= NF; i++) {
+        if ($i ~ /day/ || $i ~ /days/) { printf("%sd", $(i-1)) }
+        if ($i ~ /hour/ || $i ~ /hours/) { printf(", %sh", $(i-1)) }
+        if ($i ~ /minute/ || $i ~ /minutes/) { printf(", %sm", $(i-1)) }
+    } }')
+    local uptime_info=$(echo "$formatted_uptime" | sed 's/^, //')
+    
     # Check if the message should be sent
     if should_send_message; then
         # Format the message based on the type of alert
