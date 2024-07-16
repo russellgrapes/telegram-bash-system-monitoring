@@ -1,6 +1,6 @@
 ![alt telegram-bash-system-monitoring](https://github.com/russellgrapes/telegram-bash-system-monitoring/blob/main/placeholder.png)
 
-# Telegram Bash Linux System Monitoring
+# Telegram Bash System Monitoring Script
 
 A versatile bash script to monitor various system resources and alert via Telegram messenger.
 
