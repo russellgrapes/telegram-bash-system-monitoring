@@ -19,11 +19,12 @@ A versatile bash script to monitor various system resources and alert via Telegr
 
 The `system-monitoring.sh` script offers various command-line options for monitoring system resources:
 
-- `--NAME [ServerName]`: Assign a custom name to the server to distinguish notifications from different servers.
-- `--CPU [threshold]`: Set a CPU usage alert threshold as a percentage (%).
-- `--RAM [threshold]`: Set a RAM usage alert threshold as a percentage (%).
-- `--DISK [threshold]`: Set a disk usage alert threshold as a percentage (%).
-- `--TEMP [threshold]`: Set a CPU temperature alert threshold in degrees Celsius (°C).
+- `--NAME <ServerName>`: Assign a custom name to the server to distinguish notifications from different servers.
+- `--CPU <threshold>`: Set a CPU usage alert threshold as a percentage (%).
+- `--RAM <threshold>`: Set a RAM usage alert threshold as a percentage (%).
+- `--DISK <threshold>`: Set a disk usage alert threshold as a percentage (%).
+- `--DISK-TARGET <mount_point> `: Specifies the mount point to monitor for disk usage. Must be used with --DISK.
+- `--TEMP <threshold>`: Set a CPU temperature alert threshold in degrees Celsius (°C).
 - `--LA1 [threshold]`: Set a threshold for 1-minute Load Average. Without a specified threshold, the script uses an auto-threshold based on the hardware.
 - `--LA5 [threshold]`: Set a threshold for 5-minute Load Average. If omitted, the script defaults to an auto-threshold of 75% of the CPU cores.
 - `--LA15 [threshold]`: Set a threshold for 15-minute Load Average. If omitted, the script defaults to an auto-threshold of 50% of the CPU cores.
@@ -37,9 +38,6 @@ The `system-monitoring.sh` script offers various command-line options for monito
 
 The script can be configured via the following environment variables in the script body:
 
-- `GROUP_ID`: Your unique Telegram group/user ID where alerts will be sent.
-- `BOT_TOKEN`: The authentication token for your Telegram bot.
-- `TELEGRAM_API`: The API URL for the Telegram bot, constructed using the BOT_TOKEN.
 - `TELEGRAMM_LOCK_STATE`: The file path for the lock state file that controls alert messaging.
 - `SSH_ACTIVITY_LOGINS`: The file path where the script logs current SSH session logins.
 - `SFTP_ACTIVITY_LOGINS`: The file path where the script logs current SFTP session logins.
@@ -81,8 +79,9 @@ chmod +x system-monitoring.sh
 
 ## Running the Script
 
-Run the script with the desired thresholds:
+When you run the script for the first time, it will prompt you to create a secrets file with your Telegram GROUP_ID and BOT_TOKEN. The script will then test the connection to Telegram. If successful, it will send a test message to your Telegram group and print a success message. If there is an error, it will notify you and exit.
 
+Run the script with the desired thresholds:
 ```bash
 ./system-monitoring.sh --LA1 --LA5 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN
 ```
@@ -100,7 +99,11 @@ crontab -e
 Add the following line to run the script at reboot:
 
 ```bash
-@reboot /path/to/system-monitoring.sh --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN --REBOOT
+@reboot /path/to/system-monitoring.sh --NAME MyDebian --LA15 --CPU 80 --RAM 70 --DISK 90 --SSH-LOGIN --SFTP-MONITOR --REBOOT
+
+# Optional monitoring for other mount points
+@reboot /path/to/system-monitoring.sh --NAME MyDebian --DISK 90 --DISK-TARGET /mnt/my_disk1
+@reboot /path/to/system-monitoring.sh --NAME MyDebian --DISK 90 --DISK-TARGET /mnt/my_disk2
 ```
 
 Replace `/path/to/system-monitoring.sh` with the actual path to your script.
@@ -110,14 +113,10 @@ Replace `/path/to/system-monitoring.sh` with the actual path to your script.
 To configure the script settings, open it with your text editor. For example, using nano:
 
 ```bash
-nano /path/to/system-monitoring.sh
+nano system-monitoring.sh
 ```
 
-Find the section labeled `# Settings` and set the main settings:
-
-- `GROUP_ID`: Your Telegram group ID where alerts will be sent.
-- `BOT_TOKEN`: Your Telegram bot token for authentication.
-- `TELEGRAMM_LOCK_STATE`: Path to the lock state file which controls alert messaging.
+The script now automatically handles the creation of the secrets file and tests the connection to Telegram. If you need to update your GROUP_ID or BOT_TOKEN, you can delete the secrets file located at `/etc/telegram.secrets` and rerun the script to recreate it.
 
 For instructions on how to obtain your Telegram `GROUP_ID` and `BOT_TOKEN`, see the section below.
 
