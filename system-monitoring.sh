@@ -6,12 +6,16 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.76
+#    system-monitoring.sh v.4.00
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
 # It monitors CPU, RAM, Disk usage, CPU temperature, and Load Averages across different intervals. Designed to be initiated
 # at system startup, it ensures that resource usage is under constant surveillance without the need for scheduled cron jobs.
+
+# The script reads the Telegram group ID and bot token from a secrets file located at /etc/telegram.secrets.
+# If the secrets file does not exist, the script will prompt the user to create it, inputting the required
+# GROUP_ID and BOT_TOKEN values. The secrets file is then secured with permissions set to 600.
 
 # To have the script automatically start monitoring when the server boots, add the following line to your crontab:
 # @reboot /path/to/system-monitoring.sh --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 --LA5 --LA15 --SSH-LOGIN
@@ -28,32 +32,15 @@
 
 
 
-# Telegram Settings
-
-# GROUP_ID should be set to the Telegram group ID where alerts will be sent.
-# BOT_TOKEN is the token for the Telegram bot that will send the messages.
-GROUP_ID="your_telegram_group_id"  # Replace with your actual Telegram group ID
-BOT_TOKEN="your_bot_token"         # Replace with your actual Telegram bot token
-
-# TELEGRAM_API constructs the URL endpoint for sending messages via the Telegram bot API.
-TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage" # Normally, there's no need to change it.
-
-# TELEGRAMM_LOCK_STATE is the file that controls the sending of alerts.
-# A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
-TELEGRAMM_LOCK_STATE="/root/telegram_lockfile.state"
-
-
-
-
-
-
-
-
-
 # Script Settings
 
 # Default host name if not provided with --NAME key
-HOST_NAME="My Host"
+HOST_NAME="MyDebian"
+
+# SECRETS_FILE: Path to the file containing the Telegram group ID (GROUP_ID) and bot token (BOT_TOKEN).
+# This file is used to securely store the credentials required to send messages to Telegram.
+# If the file does not exist, the script will prompt the user to create it and input the required values.
+SECRETS_FILE="/etc/telegram.secrets"
 
 # Configuration variables for check intervals
 # Frequent checks ensure prompt notifications of for urgent resource checks like CPU, RAM, LA1, etc
@@ -77,7 +64,7 @@ SFTP_ACTIVITY_LOGINS="/root/sftp_activity_logins.txt"
 LAST_BOOT_TIME_FILE="/root/last_boot_time.txt"
 
 # SSH_ACTIVITY_EXCLUDED_IPS is an array that holds IP addresses or CIDR ranges that should be
-# ignored by the --SSH-LOGIN monitoring feature. When specifying this key, the script will not
+# ignored by the --SSH-LOGIN and --SFTP-MONITOR monitoring feature. When specifying this key, the script will not
 # send alerts for SSH logins originating from these IPs. Examples of valid entries include:
 # - "192.168.1.1" or "192.168.2.4/32" for individual IP addresses,
 # - "192.168.1.0/24" for all IPs in the range 192.168.1.0 to 192.168.1.255,
@@ -85,48 +72,46 @@ LAST_BOOT_TIME_FILE="/root/last_boot_time.txt"
 # SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.1" "192.168.2.4/32")
 SSH_ACTIVITY_EXCLUDED_IPS=()
 
+# TELEGRAMM_LOCK_STATE is the file that controls the sending of alerts.
+# A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
+TELEGRAMM_LOCK_STATE="/home/config-sync/telegramm_lock.state"
 
 
 
 
 
 
-
-
-# Main Code
-
-# Prints usage instructions
+# Usage instructions
 print_help() {
     echo ""
     echo "Usage: $0 [options]"
     echo "Monitors system resources and sends alerts via Telegram if specified thresholds are exceeded."
     echo ""
     echo "Options:"
-    echo "  --NAME host_name            Specifies a custom identifier for the host being monitored."
-    echo "  --CPU CPU_%                 Sets the CPU usage percentage threshold for generating an alert."
-    echo "  --RAM RAM_%                 Sets the RAM usage percentage threshold for generating an alert."
-    echo "  --DISK DISK_%               Sets the disk usage percentage threshold for generating an alert."
-    echo "  --TEMP TEMP_°C              Sets the CPU temperature threshold for generating an alert (in Celsius)."
-    echo "  --LA1 [threshold]           Sets a custom or auto-threshold (equal to CPU cores) for the 1-minute Load Average."
-    echo "  --LA5 [threshold]           Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
-    echo "  --LA15 [threshold]          Sets a custom or 50% CPU cores auto-threshold for the 15-minute Load Average."
-    echo "  --SSH-LOGIN                 Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
-    echo "  --SFTP-MONITOR              Activates monitoring of SFTP sessions and sends alerts for new sessions from non-excluded IPs."
-    echo "  --REBOOT                    Sends an alert if the server has been rebooted since the last script execution."
-    echo "  -h, --help                  Displays this help message."
+    echo "  --NAME host_name              Specifies a custom identifier for the host being monitored."
+    echo "  --CPU <CPU_%>                 Sets the CPU usage percentage threshold for generating an alert."
+    echo "  --RAM <RAM_%>                 Sets the RAM usage percentage threshold for generating an alert."
+    echo "  --DISK <DISK_%>               Sets the disk usage percentage threshold for generating an alert."
+    echo "  --DISK-TARGET <mount_point>   Specifies the mount point to monitor for disk usage. Must be used with --DISK."
+    echo "  --TEMP <TEMP_°C>              Sets the CPU temperature threshold for generating an alert (in Celsius)."
+    echo "  --LA1 [threshold]             Sets a custom or auto-threshold (equal to CPU cores) for the 1-minute Load Average."
+    echo "  --LA5 [threshold]             Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
+    echo "  --LA15 [threshold]            Sets a custom or 50% CPU cores auto-threshold for the 15-minute Load Average."
+    echo "  --SSH-LOGIN                   Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
+    echo "  --SFTP-MONITOR                Activates monitoring of SFTP sessions and sends alerts for new sessions from non-excluded IPs."
+    echo "  --REBOOT                      Sends an alert if the server has been rebooted since the last script execution."
+    echo "  -h, --help                    Displays this help message."
     echo ""
     echo "Files:"
-    echo "  \$SSH_ACTIVITY_LOGINS       Specifies the path to the file storing current SSH login sessions for monitoring."
-    echo "  \$SFTP_ACTIVITY_LOGINS      Specifies the path to the file storing current SFTP session details for monitoring."
-    echo "  \$TELEGRAMM_LOCK_STATE      Specifies the path to the file that controls the lock state for Telegram notifications."
-    echo "  \$LAST_BOOT_TIME_FILE       Specifies the path to the file that stores the last recorded boot time."
+    echo "  \$SSH_ACTIVITY_LOGINS         Specifies the path to the file storing current SSH login sessions for monitoring."
+    echo "  \$SFTP_ACTIVITY_LOGINS        Specifies the path to the file storing current SFTP session details for monitoring."
+    echo "  \$TELEGRAMM_LOCK_STATE        Specifies the path to the file that controls the lock state for Telegram notifications."
+    echo "  \$LAST_BOOT_TIME_FILE         Specifies the path to the file that stores the last recorded boot time."
     echo ""
     echo "Variables:"
-    echo "  \$GROUP_ID                  Specifies the Telegram group ID for sending alerts."
-    echo "  \$BOT_TOKEN                 Specifies the Telegram bot token for authentication."
-    echo "  \$FAST_CHECK_INTERVAL       Defines the interval in seconds for urgent resource checks (CPU, RAM, and Load Averages)."
-    echo "  \$SLOW_CHECK_INTERVAL       Defines the interval in seconds for less urgent resource checks (Disk Usage, CPU Temperature)."
-    echo "  \$SSH_ACTIVITY_EXCLUDED_IPS Lists the array of IP addresses excluded from SSH & SFTP alerts."
+    echo "  \$FAST_CHECK_INTERVAL         Defines the interval in seconds for urgent resource checks (CPU, RAM, and Load Averages)."
+    echo "  \$SLOW_CHECK_INTERVAL         Defines the interval in seconds for less urgent resource checks (Disk Usage, CPU Temperature)."
+    echo "  \$SSH_ACTIVITY_EXCLUDED_IPS   Lists the array of IP addresses excluded from SSH & SFTP alerts."
     echo ""
     echo "Telegram messages are sent based on the lock state defined by the \$TELEGRAMM_LOCK_STATE variable."
     echo "If the file's content is '1', messages will not be sent."
@@ -136,6 +121,7 @@ print_help() {
     echo "  --LA1 defaults to the number of CPU cores."
     echo "  --LA5 defaults to 75% of the CPU core count."
     echo "  --LA15 defaults to 50% of the CPU core count."
+    echo ""
     echo "The --REBOOT option will alert on server reboots, using the last recorded boot time for comparison."
     echo ""
     echo "Monitoring intervals can be customized by modifying the \$RESOURCE_CHECK_INTERVAL"
@@ -145,8 +131,9 @@ print_help() {
     echo "which defines specific IPs that are exempt from login alerts."
     echo ""
     echo "Examples:"
-    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --LA1 2 --LA15 --SSH-LOGIN --REBOOT"
-    echo "  $0 --NAME MyServer --TEMP 66 --LA15 --SSH-LOGIN --REBOOT"
+    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --TEMP 66 --LA1 2 --LA5 2 --LA15 1"
+    echo "  $0 --NAME MyServer --LA1 --LA5 --LA15 --SSH-LOGIN --SFTP-MONITOR --REBOOT"
+    echo "  $0 --NAME MyServer --DISK 90 --DISK-TARGET /mnt/my_disk"
     echo ""
 }
 
@@ -155,10 +142,86 @@ print_help() {
 
 
 
-
-
-
 # Telegram functions
+
+# Function to Test the Telegram API Connection
+test_telegram_connection() {
+    local response
+    response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d chat_id="$GROUP_ID" \
+        -d text="Test message from monitoring script")
+    
+    if echo "$response" | grep -q '"ok":false'; then
+        if echo "$response" | grep -q '"error_code":401'; then
+            echo ""
+            echo "Error: BOT_TOKEN is wrong."
+            echo ""
+            rm -f $SECRETS_FILE
+            echo "Secrets file '$SECRETS_FILE' deleted."
+            exit 1
+        elif echo "$response" | grep -q '"error_code":400' && echo "$response" | grep -q 'chat not found'; then
+            echo ""
+            echo "Error: GROUP_ID is wrong."
+            echo ""
+            rm -f $SECRETS_FILE
+            echo "Secrets file '$SECRETS_FILE' deleted."
+            exit 1
+        else
+            echo ""
+            echo "Error: General error, something went wrong."
+            echo "Response: $response"
+            echo ""
+            exit 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Function to load secrets from file and check requared software
+function load_secrets {
+    if [[ ! -f "$SECRETS_FILE" ]]; then
+        check_required_software
+        create_secrets_file
+    fi
+    
+    source "$SECRETS_FILE"
+}
+
+# Function to create secret file is it it does not exists
+function create_secrets_file {
+    echo ""
+    echo "The secrets file '$SECRETS_FILE' does not exist."
+    echo "Let's create it."
+    echo ""
+    
+    echo "GROUP_ID should be set to the Telegram group ID where alerts will be sent."
+    echo "BOT_TOKEN is the token for the Telegram bot that will send the messages."
+    
+    echo ""
+    echo "Example GROUP_ID:  12345678"
+    echo "Example BOT_TOKEN: 9987654321:RtG8kL5vX7bQw9mP2nR4aD1uY6jZ3eN5fC8oK4hV1xL7"
+    
+    echo ""
+    read -p "Enter the Telegram group ID (GROUP_ID): " GROUP_ID
+    read -p "Enter the Telegram bot token (BOT_TOKEN): " BOT_TOKEN
+    
+    echo "GROUP_ID=\"$GROUP_ID\"" > "$SECRETS_FILE"
+    echo "BOT_TOKEN=\"$BOT_TOKEN\"" >> "$SECRETS_FILE"
+    
+    echo ""
+    chmod 600 "$SECRETS_FILE"
+    echo "Secrets file '$SECRETS_FILE' created with permissions set to 600."
+    
+    # Test Telegram connection
+    if test_telegram_connection; then
+        echo "Successfully connected to Telegram. A test message has been sent."
+        exit 1
+    else
+        echo "Error: Failed to connect to Telegram. Please check your GROUP_ID and BOT_TOKEN."
+        exit 1
+    fi
+}
 
 # Function to check if messages should be sent based on lock state
 should_send_message() {
@@ -207,9 +270,12 @@ send_telegram_alert() {
         # Format the message based on the type of alert
         local formatted_message
         case $alert_type in
-            CPU|RAM|DISK|TEMP)
+            CPU|RAM|TEMP)
                 formatted_message="*${alert_type}* usage is high: *$message%*\n\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage"
                 ;;
+            DISK)
+                formatted_message="*${alert_type}* high usage: $message\n\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage"
+            ;;
             LA1|LA5|LA15)
                 # For Load Average alerts, message is already prepared
                 formatted_message="*$message*\nLA1: $load1 | LA5: $load5 | LA15: $load15\n\nCPU: $cpu_usage | RAM: $ram_usage | DISK: $disk_usage"
@@ -250,10 +316,7 @@ send_telegram_alert() {
 
 
 
-
-
-
-# Functions for helping
+# Additional functions
 
 # Function to check if an IP is within the specified CIDR ranges or is an exact IP match.
 # It supports CIDR notation and exact IPs in the SSH_ACTIVITY_EXCLUDED_IPS array.
@@ -313,7 +376,6 @@ check_ip_in_range() {
     echo "$match_found"
 }
 
-
 # Function to check for necessary software on the system
 check_required_software() {
     local missing_counter=0
@@ -371,12 +433,6 @@ get_server_ip() {
     # This will get the IP address of the server's default route interface
     ip route get 1.2.3.4 | awk '{print $7; exit}'
 }
-
-
-
-
-
-
 
 
 
@@ -506,11 +562,17 @@ check_ram() {
 # Function to check Disk usage
 check_disk() {
     local disk_threshold=$1
-    local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}' | sed 's/%//')
-
+    local mount_point=$2
+    local disk_usage=$(df -h | awk -v mp="$mount_point" '$NF==mp{printf "%s", $5}' | sed 's/%//')
+    
     if [[ "$disk_usage" -ge "$disk_threshold" ]]; then
-        echo "Disk usage is high: $disk_usage%"
-        send_telegram_alert "DISK" "$disk_usage"
+        if [[ "$mount_point" != "/" ]]; then
+            echo "Disk high usage: $disk_usage% on $mount_point"
+            send_telegram_alert "DISK" "*$disk_usage%* on *$mount_point*"
+        else
+            echo "Disk high usage: $disk_usage%"
+            send_telegram_alert "DISK" "*$disk_usage%*"
+        fi
     fi
 }
 
@@ -610,7 +672,6 @@ check_reboot() {
 
 
 
-
 # Main Funcions
 
 # Function to perform fast resource checks
@@ -634,7 +695,13 @@ fast_monitor_resources() {
 # These metrics are checked less frequently because they are less likely to fluctuate rapidly.
 slow_monitor_resources() {
     while true; do
-        [[ -n "$DISK_THRESHOLD" ]] && check_disk "$DISK_THRESHOLD"
+        if [[ -n "$DISK_THRESHOLD" ]]; then
+            if [[ -n "$DISK_TARGET" ]]; then
+                check_disk "$DISK_THRESHOLD" "$DISK_TARGET"
+            else
+                check_disk "$DISK_THRESHOLD" "/"
+            fi
+        fi
         [[ -n "$TEMP_THRESHOLD" ]] && check_temp "$TEMP_THRESHOLD"
         [[ -n "$LA15_THRESHOLD" ]] && check_la15 "$LA15_THRESHOLD"
         [[ -n "$REBOOT_MONITORING" ]] && check_reboot
@@ -669,6 +736,21 @@ parse_arguments() {
                 declare -n threshold_var="${1#--}_THRESHOLD"
                 threshold_var="$2"
                 shift 2  # Move past the argument and its value
+                ;;
+            --DISK-TARGET)
+                if [[ -z "$2" || "$2" == --* ]]; then
+                    echo "Error: --DISK-TARGET must be followed by a mount point."
+                    exit 1
+                fi
+                DISK_TARGET="$2"
+                # Validate that the mount point exists
+                if ! df -h | awk '{print $NF}' | grep -qx "$DISK_TARGET"; then
+                    echo "Error: Mount point '$DISK_TARGET' does not exist."
+                    echo "Available mount points are:"
+                    df -h | awk '{print $NF}' | tail -n +2  # Skip the header line
+                    exit 1
+                fi
+                shift 2
                 ;;
             --LA1|--LA5|--LA15)
                 # Check if a value is provided for Load Average thresholds
@@ -727,6 +809,7 @@ validate_thresholds() {
     [[ -n "$CPU_THRESHOLD" ]] && echo "CPU Threshold: $CPU_THRESHOLD%"
     [[ -n "$RAM_THRESHOLD" ]] && echo "RAM Threshold: $RAM_THRESHOLD%"
     [[ -n "$DISK_THRESHOLD" ]] && echo "Disk Usage Threshold: $DISK_THRESHOLD%"
+    [[ -n "$DISK_TARGET" ]] && echo "Disk Target Mount Point: $DISK_TARGET"
     [[ -n "$TEMP_THRESHOLD" ]] && echo "CPU Temperature Threshold: $TEMP_THRESHOLD°C"
 
     # Check if SSH login monitoring is enabled.
@@ -764,10 +847,6 @@ validate_thresholds() {
     fi
 
     echo ""
-    # Check for required software
-    check_required_software
-
-    echo ""
     echo "Notifications: "
 
     # If no custom thresholds are set and no monitoring features are enabled, exit with an error.
@@ -783,10 +862,13 @@ validate_thresholds() {
 
 
 
-
-
-
-# Main code
+# Main logic
+                
+# Load secrets
+load_secrets
+                
+# API endpoint
+TELEGRAM_API="https://api.telegram.org/bot$BOT_TOKEN/sendMessage" # Normally, there's no need to change it.
 
 # If no arguments are passed, print the help message and exit
 if [ "$#" -eq 0 ]; then
@@ -805,4 +887,4 @@ fast_monitor_resources &
 slow_monitor_resources &
 
 # Wait for background processes to prevent script from exiting
-wait
+wait           
