@@ -34,14 +34,6 @@
 
 # Script Settings
 
-# Default host name if not provided with --NAME key
-HOST_NAME="MyDebian"
-
-# SECRETS_FILE: Path to the file containing the Telegram group ID (GROUP_ID) and bot token (BOT_TOKEN).
-# This file is used to securely store the credentials required to send messages to Telegram.
-# If the file does not exist, the script will prompt the user to create it and input the required values.
-SECRETS_FILE="/etc/telegram.secrets"
-
 # Configuration variables for check intervals
 # Frequent checks ensure prompt notifications of for urgent resource checks like CPU, RAM, LA1, etc
 FAST_CHECK_INTERVAL=60  # 1 minute in seconds
@@ -76,6 +68,14 @@ SSH_ACTIVITY_EXCLUDED_IPS=()
 # A content of '1' in the LOCK file prevents alerts, enabling manual control during maintenance.
 TELEGRAMM_LOCK_STATE="/home/config-sync/telegramm_lock.state"
 
+# Default host name if not provided with --NAME key
+#HOST_NAME="MyDebian"
+HOST_NAME=$(hostname)
+
+# SECRETS_FILE: Path to the file containing the Telegram group ID (GROUP_ID) and bot token (BOT_TOKEN).
+# This file is used to securely store the credentials required to send messages to Telegram.
+# If the file does not exist, the script will prompt the user to create it and input the required values.
+SECRETS_FILE="/etc/telegram.secrets"
 
 
 
@@ -216,7 +216,6 @@ function create_secrets_file {
     # Test Telegram connection
     if test_telegram_connection; then
         echo "Successfully connected to Telegram. A test message has been sent."
-        exit 1
     else
         echo "Error: Failed to connect to Telegram. Please check your GROUP_ID and BOT_TOKEN."
         exit 1
