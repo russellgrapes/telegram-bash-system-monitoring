@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v.3.74
+#    system-monitoring.sh v.3.75
 # -----------------------------------
 
 # The system-monitoring.sh script is a dedicated monitoring solution for Unix-like systems that sends alerts to Telegram.
@@ -383,7 +383,7 @@ get_server_ip() {
 # The function updates the saved list after each check.
 check_ssh_activity() {
     # Fetch the current SSH sessions
-    local current_logins=$(LC_ALL=C who -s | awk '{print $1, $6, $3, $4, $5}') # Extract username, IP, date, and time
+    local current_logins=$(LC_ALL=C who -u | awk '{print $1, $8, $3, $4, $5, $7}') # Extract username, IP, date, time and pid
     local last_logins=$(cat "$SSH_ACTIVITY_LOGINS" 2>/dev/null)
 
     # Update the saved state with the current SSH sessions
