@@ -100,6 +100,7 @@ print_help() {
     echo "  --SSH-LOGIN                   Activates monitoring of SSH logins and sends alerts for logins from non-excluded IPs."
     echo "  --SFTP-MONITOR                Activates monitoring of SFTP sessions and sends alerts for new sessions from non-excluded IPs."
     echo "  --REBOOT                      Sends an alert if the server has been rebooted since the last script execution."
+    echo "  --DOCKER-MONITOR              Activates monitoring of Docker container CPU usage based on container labels."
     echo "  -h, --help                    Displays this help message."
     echo ""
     echo "Files:"
@@ -150,7 +151,7 @@ test_telegram_connection() {
     response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$GROUP_ID" \
         -d text="Test message from monitoring script")
-    
+
     if echo "$response" | grep -q '"ok":false'; then
         if echo "$response" | grep -q '"error_code":401'; then
             echo ""
@@ -174,17 +175,17 @@ test_telegram_connection() {
             exit 1
         fi
     fi
-    
+
     return 0
 }
 
-# Function to load secrets from file and check requared software
+# Function to load secrets from file and check required software
 function load_secrets {
     if [[ ! -f "$SECRETS_FILE" ]]; then
         check_required_software
         create_secrets_file
     fi
-    
+
     source "$SECRETS_FILE"
 }
 
@@ -194,25 +195,25 @@ function create_secrets_file {
     echo "The secrets file '$SECRETS_FILE' does not exist."
     echo "Let's create it."
     echo ""
-    
+
     echo "GROUP_ID should be set to the Telegram group ID where alerts will be sent."
     echo "BOT_TOKEN is the token for the Telegram bot that will send the messages."
-    
+
     echo ""
     echo "Example GROUP_ID:  12345678"
     echo "Example BOT_TOKEN: 9987654321:RtG8kL5vX7bQw9mP2nR4aD1uY6jZ3eN5fC8oK4hV1xL7"
-    
+
     echo ""
     read -p "Enter the Telegram group ID (GROUP_ID): " GROUP_ID
     read -p "Enter the Telegram bot token (BOT_TOKEN): " BOT_TOKEN
-    
+
     echo "GROUP_ID=\"$GROUP_ID\"" > "$SECRETS_FILE"
     echo "BOT_TOKEN=\"$BOT_TOKEN\"" >> "$SECRETS_FILE"
-    
+
     echo ""
     chmod 600 "$SECRETS_FILE"
     echo "Secrets file '$SECRETS_FILE' created with permissions set to 600."
-    
+
     # Test Telegram connection
     if test_telegram_connection; then
         echo "Successfully connected to Telegram. A test message has been sent."
@@ -253,9 +254,9 @@ send_telegram_alert() {
     local disk_usage=$(df -h | awk '$NF=="/"{printf "%s", $5}')
     local num_cores=$(nproc)
     local cpu_usage=$(awk -v cores="$num_cores" -v load0="$load1" 'BEGIN { printf "%.0f", (load0 * 100) / cores }')
-    
+
     # Convert the uptime format to 365d, 16h, 50m
-    local uptime_raw=$(uptime -p | sed 's/^up //')    
+    local uptime_raw=$(uptime -p | sed 's/^up //')
     local formatted_uptime=$(echo "$uptime_raw" | awk ' {
     for (i = 1; i <= NF; i++) {
         if ($i ~ /day/ || $i ~ /days/) { printf("%sd", $(i-1)) }
@@ -263,7 +264,7 @@ send_telegram_alert() {
         if ($i ~ /minute/ || $i ~ /minutes/) { printf(", %sm", $(i-1)) }
     } }')
     local uptime_info=$(echo "$formatted_uptime" | sed 's/^, //')
-    
+
     # Check if the message should be sent
     if should_send_message; then
         # Format the message based on the type of alert
@@ -403,7 +404,7 @@ check_required_software() {
         ["nproc"]="coreutils"
         ["who"]="coreutils"
         ["ipcalc"]="ipcalc"
-	["ss"]="iproute2"
+	      ["ss"]="iproute2"
     )
 
     echo "Checking for required software..."
@@ -563,7 +564,7 @@ check_disk() {
     local disk_threshold=$1
     local mount_point=$2
     local disk_usage=$(df -h | awk -v mp="$mount_point" '$NF==mp{printf "%s", $5}' | sed 's/%//')
-    
+
     if [[ "$disk_usage" -ge "$disk_threshold" ]]; then
         if [[ "$mount_point" != "/" ]]; then
             echo "Disk high usage: $disk_usage% on $mount_point"
@@ -668,10 +669,62 @@ check_reboot() {
 
 
 
+# Function to check Docker container CPU and Memory usage
+check_docker_containers() {
+    echo "Starting Docker container checks..."
+
+    docker ps --format "{{.ID}} {{.Names}}" | while read -r container_id container_name; do
+        echo "Checking container: $container_name (ID: $container_id)"
+
+        # Get all labels of the container
+        labels=$(docker inspect --format '{{ json .Config.Labels }}' "$container_name")
+        echo "Labels for $container_name: $labels"
+
+        # Parse the labels to extract alert thresholds
+        cpu_threshold=$(echo "$labels" | jq -r '."alert.cpu_threshold" // empty')
+        memory_threshold=$(echo "$labels" | jq -r '."alert.memory_threshold" // empty')
+
+        # Use default values if labels are not set
+        cpu_threshold=${cpu_threshold:-"90"}  # Default CPU threshold 90%
+        memory_threshold=${memory_threshold:-"1000MiB"}  # Default Memory threshold 1000MiB
+
+        # Get the current stats for the container (CPU and memory usage)
+        stats=$(docker stats "$container_name" --no-stream --format "{{.CPUPerc}} {{.MemUsage}}")
+
+        # Extract CPU usage
+        cpu_usage=$(echo "$stats" | awk '{print $1}' | sed 's/%//g')
+
+        # Extract memory usage in MiB using the improved parsing method
+        # http://www.zakariaamine.com/2019-12-04/monitoring-docker/
+        memory_value_in_mib=$(docker stats --no-stream | grep "$container_name" | awk '{ if(index($4, "GiB")) {gsub("GiB","",$4); print $4 * 1000} else {gsub("MiB","",$4); print $4}}')
+
+        # Convert memory threshold to MiB for comparison
+        memory_threshold_value=$(echo "$memory_threshold" | sed 's/[^0-9.]//g')
+        memory_threshold_unit=$(echo "$memory_threshold" | sed 's/[0-9.]//g')
+        if [[ "$memory_threshold_unit" == "GiB" ]]; then
+            memory_threshold_in_mib=$(echo "$memory_threshold_value * 1000" | bc -l)
+        else
+            memory_threshold_in_mib=$memory_threshold_value
+        fi
+
+        # Check CPU usage against the threshold
+        if [[ -n "$cpu_usage" && -n "$cpu_threshold" ]] && (( $(echo "$cpu_usage > $cpu_threshold" | bc -l) )); then
+            echo "$container_name: High CPU usage detected: $cpu_usage%"
+            send_telegram_alert "DOCKER-CPU" "$container_name: High CPU usage detected: $cpu_usage%"
+        fi
+
+        # Check Memory usage against the threshold
+        if [[ -n "$memory_value_in_mib" && -n "$memory_threshold_in_mib" ]] && (( $(echo "$memory_value_in_mib > $memory_threshold_in_mib" | bc -l) )); then
+            echo "$container_name: High memory usage detected: $memory_value_in_mib MiB"
+            send_telegram_alert "DOCKER-MEMORY" "$container_name: High memory usage detected: $memory_value_in_mib MiB"
+        fi
+    done
+
+    echo "Docker container checks completed."
+}
 
 
-
-# Main Funcions
+# Main Functions
 
 # Function to perform fast resource checks
 # This function checks CPU usage, RAM usage, and 1-minute and 5-minute Load Averages.
@@ -683,7 +736,8 @@ fast_monitor_resources() {
         [[ -n "$LA1_THRESHOLD" ]] && check_la1 "$LA1_THRESHOLD"
         [[ -n "$LA5_THRESHOLD" ]] && check_la5 "$LA5_THRESHOLD"
         [[ "$SSH_LOGIN_MONITORING" -eq 1 ]] && check_ssh_activity
-	[[ "$SFTP_LOGIN_MONITORING" -eq 1 ]] && check_sftp_activity
+	      [[ "$SFTP_LOGIN_MONITORING" -eq 1 ]] && check_sftp_activity
+	      [[ "$DOCKER_MONITORING" -eq 1 ]] && check_docker_containers
         # Sleep for the interval defined by FAST_CHECK_INTERVAL
         sleep "$FAST_CHECK_INTERVAL"
     done
@@ -774,6 +828,11 @@ parse_arguments() {
                 SFTP_LOGIN_MONITORING=1
                 shift  # Move past the argument
                 ;;
+            --DOCKER-MONITOR)
+                # Enable Docker login monitoring
+                DOCKER_MONITORING=1
+                shift  # Move past the argument
+                ;;
             --REBOOT)
                 # Enable reboot monitoring
                 REBOOT_MONITORING=1
@@ -816,6 +875,9 @@ validate_thresholds() {
 
     # Check if SFTP login monitoring is enabled.
     [[ -n "$SFTP_LOGIN_MONITORING" ]] && echo "SFTP Login Monitoring: Enabled"
+
+    # Check if Docker monitoring is enabled.
+    [[ -n "$DOCKER_MONITORING" ]] && echo "Docker Monitoring: Enabled"
 
     # Check if reboot monitoring is enabled and display it.
     if [[ -n "$REBOOT_MONITORING" ]]; then
