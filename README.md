@@ -83,7 +83,7 @@ Run it once in a real terminal (TTY) as root. It will:
 Example (pick what you want to monitor):
 
 ```bash
-sudo /usr/local/bin/system-monitoring.sh --NAME MyServer --CPU --RAM --DISK --LA1 --LA5 --LA15 --SSH --SFTP --REBOOT
+sudo system-monitoring.sh --NAME MyServer --CPU --RAM --DISK --LA1 --LA5 --LA15 --SSH --SFTP --REBOOT
 ```
 
 Stop it after the test message if you want (Ctrl-C is fine). Then move to `@reboot`.
