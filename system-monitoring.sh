@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v5.4.4
+#    system-monitoring.sh v5.5.0
 # -----------------------------------
 
 # Telegram Bash System Monitoring (single-file)
@@ -88,6 +88,15 @@ TELEGRAMM_LOCK_STATE="/root/telegramm_lock.state"
 # cron/@reboot has no TTY → create this file before enabling @reboot.
 SECRETS_FILE="/etc/telegram.secrets"
 #
+# Default exclude list for SSH/SFTP activity checks (auto-loaded if present).
+# Override per run with: --EXCLUDE-IP-LIST <file>
+# File format: one IP/CIDR per line; supports blank lines and '#' comments (inline '#' supported too).
+# Example:
+#   10.10.0.0/16
+#   203.0.113.25
+#   fd00:1234:5678::/48
+EXCLUDED_IPS_DEFAULT_FILE="/etc/system-monitoring.exclude.ip.list"
+#
 # Loop timing:
 # FAST: CPU/RAM/LA1 + SSH/SFTP activity polling
 # SLOW: disk/temp/LA15 and slow-moving checks
@@ -104,16 +113,6 @@ LA_ALERT_COOLDOWN=600      # seconds | shared across --LA1/--LA5/--LA15 alerts
 RAM_ALERT_COOLDOWN=600     # seconds | affects --RAM alerts
 DISK_ALERT_COOLDOWN=86400  # seconds | affects --DISK alerts (per mount); default: 24h
 #
-# SSH_ACTIVITY_EXCLUDED_IPS is an array that holds IP literals or CIDR ranges (IPv4 and/or IPv6) that should be
-# ignored by the --SSH and --SFTP monitoring feature. When specified, the script will not send
-# alerts for SSH/SFTP activity originating from these IPs. Examples:
-# - IPv4 single host:   "192.168.1.1" or "192.168.2.4/32"
-# - IPv4 subnet:        "192.168.1.0/24" or "10.10.0.0/16"
-# - IPv6 single host:   "2001:db8::1" or "2001:db8::1/128"
-# - IPv6 subnet:        "2001:db8::/32" or "fd00:1234:5678::/48"
-# SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.1" "2001:db8::/32" "fd00:1234:5678::/48")
-SSH_ACTIVITY_EXCLUDED_IPS=()
-
 # Advanced env knobs (optional):
 #   SSHD_LOG_SOURCE="/var/log/auth.log"   or   SSHD_LOG_SOURCE="JOURNAL"
 #   SYSTEM_MONITORING_NOLOCK=1            # bypass single-instance lock (not recommended)
@@ -169,14 +168,23 @@ print_help() {
     echo "  --BOT-TOKEN <token>            Telegram bot token (overrides secrets file for this run)."
     echo ""
     echo "Other Options:"
+    echo "  --EXCLUDE-IP-LIST <file>      Loads SSH/SFTP excluded IPs/CIDRs from a file (one per line; '#' comments allowed)."
+    echo "                                 If omitted and ${EXCLUDED_IPS_DEFAULT_FILE} exists, it is auto-loaded."
     echo "  --STATUS                      Shows whether a monitor instance is running and prints its PID(s). Must be used alone."
-    echo "  --RELOAD                      Reloads dynamic config (secrets, DISK-LIST, PING-LIST) in the running monitor (SIGHUP, fallback: SIGCONT). Must be used alone."
+    echo "  --RELOAD                      Reloads dynamic config (secrets, DISK-LIST, PING-LIST, EXCLUDE-IP-LIST) in the running monitor.Must be used alone."
     echo "  --KILL                        Stops the currently running monitor (SIGTERM -> SIGKILL). Must be used alone."
     echo "  -h, --help                    Displays this help message."
     echo ""
     echo "Files:"
     echo "  $TELEGRAMM_LOCK_STATE        Path to the file that controls Telegram notifications (A content of '1' prevents messages)."
     echo "  $SYSTEM_MONITORING_STATE_DIR/         SSH, SFTP sessions and other working ${0##*/} files are here."
+    echo ""
+    echo "Example --EXCLUDE-IP-LIST <file> contents:"
+    echo "    # One entry per line. Lines starting with # are comments; blank lines are ignored."
+    echo "    # Entries can be IPv4, IPv6, or CIDR ranges."
+    echo "    10.10.0.0/16"
+    echo "    203.0.113.25"
+    echo "    fd00:1234:5678::/48"
     echo ""
     echo "Example --DISK-LIST <file> contents:"
     echo "    # One entry per line. Lines starting with # are comments; blank lines are ignored."
@@ -192,8 +200,8 @@ print_help() {
     echo "    Name=v6-web|Host=[2001:db8::10]|Ping=false|Port=443|Interval=11|MaxFails=3"
     echo ""
     echo "Usage Examples:"
-    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --TEMP 66 --LA1 2 --LA5 2 --LA15 1"
-    echo "  $0 --NAME MyServer --LA1 --LA5 --LA15 --SSH --SFTP --REBOOT"
+    echo "  $0 --NAME MyServer --CPU 80 --RAM 70 --DISK 90 --TEMP 66 --LA1 2 --LA5 2 --LA15 1  --REBOOT"
+    echo "  $0 --NAME MyServer --LA15 --TEMP --SSH --SFTP --EXCLUDE-IP-LIST /etc/system-monitoring.exclude.ip.list"
     echo "  $0 --NAME MyServer --DISK 90 --DISK-TARGET /mnt/my_disk"
     echo "  $0 --NAME MyServer --DISK-LIST /etc/system-monitoring.disk.list"
     echo "  $0 --NAME MonitorBox --PING \"Name=router|Host=10.10.10.1|Ping=true|Port=22,80,443|Interval=11|MaxFails=3\""
@@ -268,6 +276,27 @@ SYSTEM_MONITORING_MAIN_PID_FILE="${SYSTEM_MONITORING_STATE_DIR}/system-monitorin
 # Set to 1 by SIGHUP trap to request a configuration reload.
 SYSTEM_MONITORING_RELOAD_REQUESTED=0
 
+# Outdated version of excluded IPs
+# SSH_ACTIVITY_EXCLUDED_IPS is an array that holds IP literals or CIDR ranges (IPv4 and/or IPv6) that should be
+# ignored by the --SSH and --SFTP monitoring feature. When specified, the script will not send
+# alerts for SSH/SFTP activity originating from these IPs. Examples:
+# - IPv4 single host:   "192.168.1.1" or "192.168.2.4/32"
+# - IPv4 subnet:        "192.168.1.0/24" or "10.10.0.0/16"
+# - IPv6 single host:   "2001:db8::1" or "2001:db8::1/128"
+# - IPv6 subnet:        "2001:db8::/32" or "fd00:1234:5678::/48"
+# SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.1" "2001:db8::/32" "fd00:1234:5678::/48")
+SSH_ACTIVITY_EXCLUDED_IPS=()
+
+# New version of excluded IPs
+# Optional file-based exclusions for --SSH / --SFTP:
+# - One IP/CIDR per line; '#' comments + blank lines allowed.
+# - Entries from the file are merged with SSH_ACTIVITY_EXCLUDED_IPS above.
+# - If EXCLUDED_IPS_FILE is empty, the script will auto-load EXCLUDED_IPS_DEFAULT_FILE if it exists.
+EXCLUDED_IPS_FILE=""                     # set via CLI: --EXCLUDE-IP-LIST <file>
+EXCLUDED_IPS_BASE=("${SSH_ACTIVITY_EXCLUDED_IPS[@]}")  # DO NOT EDIT (internal baseline)
+EXCLUDED_IPS_FILE_ACTIVE=""              # DO NOT EDIT (internal; which file was loaded)
+
+
 
 # Requires Bash 4.3+ (namerefs: local -n / declare -n; associative arrays: declare -A).
 if [[ -z "${BASH_VERSINFO[*]:-}" ]]; then
@@ -287,7 +316,6 @@ if [[ "$SYSTEM_MONITORING_OS" != "Linux" ]]; then
   exit 1
 fi
 readonly SYSTEM_MONITORING_OS
-
 
 
 
@@ -1609,6 +1637,9 @@ _sm_reload_and_restart_loops() {
 
     SYSTEM_MONITORING_PHASE="reload-load-external-targets"
     load_external_targets
+    
+    SYSTEM_MONITORING_PHASE="reload-load-ssh-excluded-ips"
+    load_ssh_activity_excluded_ips
 
     SYSTEM_MONITORING_PHASE="reload-dependency-check"
     check_required_software
@@ -5170,6 +5201,55 @@ load_external_targets() {
         done
     fi
 }
+            
+# Load SSH/SFTP excluded IPs from file (optional) and merge with hardcoded list.
+# Rebuilds SSH_ACTIVITY_EXCLUDED_IPS from EXCLUDED_IPS_BASE + file entries,
+# so it can be called safely on --RELOAD without accumulating duplicates.
+load_ssh_activity_excluded_ips() {
+    # Reset to baseline (hardcoded) first
+    SSH_ACTIVITY_EXCLUDED_IPS=("${EXCLUDED_IPS_BASE[@]}")
+    EXCLUDED_IPS_FILE_ACTIVE=""
+
+    local list_file=""
+    if [[ -n "${EXCLUDED_IPS_FILE:-}" ]]; then
+        list_file="$EXCLUDED_IPS_FILE"
+        if [[ ! -f "$list_file" ]]; then
+            echo "Error: --EXCLUDE-IP-LIST file not found: $list_file" >&2
+            exit 1
+        fi
+    elif [[ -n "${EXCLUDED_IPS_DEFAULT_FILE:-}" && -f "$EXCLUDED_IPS_DEFAULT_FILE" ]]; then
+        list_file="$EXCLUDED_IPS_DEFAULT_FILE"
+    fi
+
+    [[ -z "$list_file" ]] && return 0
+    EXCLUDED_IPS_FILE_ACTIVE="$list_file"
+
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        # Strip comments and whitespace
+        line="${line%%#*}"
+        line="$(trim_ws "$line")"
+        [[ -z "$line" ]] && continue
+        SSH_ACTIVITY_EXCLUDED_IPS+=("$line")
+    done < "$list_file"
+
+    # De-dup (keeps first occurrence order)
+    if [[ ${#SSH_ACTIVITY_EXCLUDED_IPS[@]} -gt 1 ]]; then
+        local -A seen
+        local -a uniq=()
+        local e
+        for e in "${SSH_ACTIVITY_EXCLUDED_IPS[@]}"; do
+            e="$(trim_ws "$e")"
+            [[ -z "$e" ]] && continue
+            if [[ -z "${seen["$e"]+x}" ]]; then
+                uniq+=("$e")
+                seen["$e"]=1
+            fi
+        done
+        SSH_ACTIVITY_EXCLUDED_IPS=("${uniq[@]}")
+    fi
+}
 
 external_ping_host() {
     local host
@@ -6032,6 +6112,14 @@ parse_arguments() {
                 SFTP_LOGIN_MONITORING=1
                 shift
                 ;;
+            --EXCLUDE-IP-LIST)
+                if [[ -z "$2" || "$2" == --* ]]; then
+                    echo "Error: $1 must be followed by a file path."
+                    exit 1
+                fi
+                EXCLUDED_IPS_FILE="$2"
+                shift 2
+                ;;
             --REBOOT)
                 REBOOT_MONITORING=1
                 shift
@@ -6321,6 +6409,10 @@ trap 'cleanup $?'  EXIT
 # Load external monitoring targets (CLI + optional config file) before dependency checks
 SYSTEM_MONITORING_PHASE="load-external-targets"
 load_external_targets
+
+# Load SSH/SFTP excluded IP list (hardcoded + optional file) before dependency checks
+SYSTEM_MONITORING_PHASE="load-ssh-excluded-ips"
+load_ssh_activity_excluded_ips
 
 # Dependency checks (after secrets load so we can notify failures via Telegram)
 SYSTEM_MONITORING_PHASE="dependency-check"
