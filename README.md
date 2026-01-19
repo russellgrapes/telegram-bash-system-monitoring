@@ -47,7 +47,7 @@ If bash monitoring scripts had a flagship phone — this is the Pro model.
   - Stored in `/etc/telegram.secrets` (root-owned, `600`, not a symlink)
   - Parsed as data (not executed)
   - Interactive first-run setup hides the bot token input
-- **Maintenance mode** (instant mute): lock file `'/root/telegramm_lock.state'`
+- **Maintenance mode** (instant mute): lock file `'/etc/telegramm_lock.state'`
 - **Single-instance enforcement** (flock lock; PID fallback)
 - **Control plane**:
   - `--STATUS` / `--RELOAD` / `--KILL` (must be used alone)
@@ -228,7 +228,7 @@ What you get:
 * “Active” and “Ended” notifications (stateful, no spam)
 * A snapshot file updated every fast tick:
 
-  * `/root/.system-monitoring/ssh_activity_logins.txt` (safe to tail)
+  * `/var/lib/system-monitoring/ssh_activity_logins.txt` (safe to tail)
 
 ### Excluding trusted IP ranges
 
