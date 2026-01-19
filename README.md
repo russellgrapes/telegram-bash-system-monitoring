@@ -232,13 +232,24 @@ What you get:
 
 ### Excluding trusted IP ranges
 
-Edit the script’s `SSH_ACTIVITY_EXCLUDED_IPS` array (near the top):
+Create `/etc/system-monitoring.exclude.ip.list` (auto-loaded if it exists — no flag required):
+
+```ini
+# One IP/CIDR per line. '#' comments + blank lines allowed.
+10.10.0.0/16
+192.168.1.0/24
+203.0.113.25
+2001:db8::/32
+````
+
+Or load a custom file:
 
 ```bash
-SSH_ACTIVITY_EXCLUDED_IPS=("10.10.0.0/16" "192.168.1.0/24" "2001:db8::/32")
+sudo system-monitoring.sh --NAME MyServer --SSH --SFTP --EXCLUDE-IP-LIST /path/to/exclude.list
 ```
 
 CIDR matching is done with Python’s standard `ipaddress` module (correct for IPv4 + IPv6).
+Changes apply on `--RELOAD` (re-reads the active exclude file and restarts loops in-place).
 
 ### Flash detection (the hidden killer feature)
 
@@ -290,7 +301,7 @@ Status:
 sudo system-monitoring.sh --STATUS
 ```
 
-Reload config (secrets + `--DISK-LIST` + `--PING-LIST`, restarts loops in-place):
+Reload config (secrets + `--DISK-LIST` + `--PING-LIST` + exclude IP list, restarts loops in-place):
 
 ```bash
 sudo system-monitoring.sh --RELOAD
@@ -357,6 +368,7 @@ Supported flags:
 * `--LA15 [threshold]` (omit threshold for auto = 50% of CPU cores)
 * `--SSH`
 * `--SFTP`
+* `--EXCLUDE-IP-LIST <file>`
 * `--REBOOT`
 * `--PING <spec>` (repeatable)
 * `--PING-LIST <file>`
