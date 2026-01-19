@@ -47,7 +47,7 @@ If bash monitoring scripts had a flagship phone — this is the Pro model.
   - Stored in `/etc/telegram.secrets` (root-owned, `600`, not a symlink)
   - Parsed as data (not executed)
   - Interactive first-run setup hides the bot token input
-- **Maintenance mode** (instant mute): lock file `'/usr/local/bin/telegramm_lock.state'`
+- **Maintenance mode** (instant mute): lock file `'/root/telegramm_lock.state'`
 - **Single-instance enforcement** (flock lock; PID fallback)
 - **Control plane**:
   - `--STATUS` / `--RELOAD` / `--KILL` (must be used alone)
@@ -228,7 +228,7 @@ What you get:
 * “Active” and “Ended” notifications (stateful, no spam)
 * A snapshot file updated every fast tick:
 
-  * `/usr/local/bin/.system-monitoring/ssh_activity_logins.txt` (safe to tail)
+  * `/root/.system-monitoring/ssh_activity_logins.txt` (safe to tail)
 
 ### Excluding trusted IP ranges
 
@@ -260,20 +260,20 @@ If sshd’s `LogLevel` is too quiet (e.g. `ERROR`), flash detection can’t see 
 
 Core switch:
 
-* `/usr/local/bin/telegramm_lock.state`
+* `/root/telegramm_lock.state`
 
 Mute:
 
 ```bash
-echo 1 | sudo tee /usr/local/bin/telegramm_lock.state >/dev/null
+echo 1 | sudo tee /root/telegramm_lock.state >/dev/null
 ```
 
 Unmute:
 
 ```bash
-sudo rm -f /usr/local/bin/telegramm_lock.state
+sudo rm -f /root/telegramm_lock.state
 # or:
-echo 0 | sudo tee /usr/local/bin/telegramm_lock.state >/dev/null
+echo 0 | sudo tee /root/telegramm_lock.state >/dev/null
 ```
 
 When you unlock, the script resets cooldown state so alerts resume immediately (you don’t miss real issues because of “cooldown time written while muted”).
