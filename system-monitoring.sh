@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v5.4.2
+#    system-monitoring.sh v5.4.4
 # -----------------------------------
 
 # Telegram Bash System Monitoring (single-file)
@@ -77,12 +77,12 @@ HOST_NAME=$(hostname)
 #
 # Internal state (locks, last-alert timestamps, ssh/sftp session snapshots).
 # Safe to delete if you want a clean reset.
-SYSTEM_MONITORING_STATE_DIR="/usr/local/bin/.system-monitoring"
+SYSTEM_MONITORING_STATE_DIR="/var/lib/system-monitoring"
 #
 # Telegram mute switch (maintenance mode):
 #   "1" = locked (no alerts)
 #   missing/empty/anything else = alerts enabled
-TELEGRAMM_LOCK_STATE="/usr/local/bin/telegramm_lock.state"
+TELEGRAMM_LOCK_STATE="/root/telegramm_lock.state"
 #
 # Telegram credentials (created interactively on first run WITH a TTY).
 # cron/@reboot has no TTY → create this file before enabling @reboot.
@@ -480,15 +480,18 @@ function load_secrets {
         esac
     done < "$SECRETS_FILE"
     
-    [[ -n "${__xtrace_was_on_secrets:-}" ]] && set -x
-
+    # Keep xtrace OFF until after we have finished handling secrets.
+    # Otherwise, bash -x / set -x would print GROUP_ID/BOT_TOKEN during the checks below.
     if [[ -z "$GROUP_ID" || -z "$BOT_TOKEN" ]]; then
+        [[ -n "${__xtrace_was_on_secrets:-}" ]] && set -x
         echo "Error: Could not read GROUP_ID and BOT_TOKEN from '$SECRETS_FILE'."
         echo "Expected lines like:"
         echo 'GROUP_ID="12345678"'
         echo 'BOT_TOKEN="123456:ABC..."'
         exit 1
     fi
+    
+    [[ -n "${__xtrace_was_on_secrets:-}" ]] && set -x
 }
 
 # Function to create secret file if it does not exist
@@ -554,12 +557,17 @@ function create_secrets_file {
     printf "\n" >&4
 
     # Close TTY FDs early; everything after this should behave normally.
-    exec 3<&- 4>&-
-
+    # Prevent xtrace (bash -x / set -x) from printing secrets during validation.
+    local __xtrace_was_on_create=
+    [[ $- == *x* ]] && __xtrace_was_on_create=1 && set +x
+    
     if [[ -z "$GROUP_ID" || -z "$BOT_TOKEN" ]]; then
+        [[ -n "${__xtrace_was_on_create:-}" ]] && set -x
         echo "Error: GROUP_ID and BOT_TOKEN cannot be empty."
         exit 1
     fi
+    
+    [[ -n "${__xtrace_was_on_create:-}" ]] && set -x
     
     # Write secrets file securely (no permissive window; atomic replace).
     local _old_umask _tmp
@@ -933,9 +941,16 @@ CURLCFG
 
 # For ERROR notifications we do NOT respect the lock file. If the script is broken, the user should know.
 telegram_can_notify_error() {
-    [[ -n "${GROUP_ID:-}" && -n "${BOT_TOKEN:-}" ]] || return 1
-    command -v curl >/dev/null 2>&1 || return 1
-    return 0
+    # Prevent leaking BOT_TOKEN/GROUP_ID when run with `bash -x` / `set -x`.
+    local __xtrace_was_on=
+    [[ $- == *x* ]] && __xtrace_was_on=1 && set +x
+
+    local ok=0
+    [[ -n "${GROUP_ID:-}" && -n "${BOT_TOKEN:-}" ]] || ok=1
+    command -v curl >/dev/null 2>&1 || ok=1
+
+    [[ -n "${__xtrace_was_on:-}" ]] && set -x
+    return $ok
 }
 
 # Minimal Telegram sender that does NOT rely on free/df/nproc/bc/etc.
@@ -1445,7 +1460,13 @@ _sm_control_reload() {
         return 3
     fi
 
-    local delivered=0
+    # Result tracking:
+    # - sent_any:        we successfully sent a signal to at least one instance
+    # - supported_any:   at least one instance either (a) reports catching HUP/CONT, or (b) we can't verify due to restricted /proc
+    # - unknown_any:     at least one instance couldn't be verified via /proc (SigCgt missing/unreadable)
+    local sent_any=0
+    local supported_any=0
+    local unknown_any=0
     local pid
 
     for pid in "${roots[@]}"; do
@@ -1453,6 +1474,7 @@ _sm_control_reload() {
         # This prevents accidental termination of older instances that do not trap HUP.
         local sig="HUP"
         local catches=0
+        local sigmask_known=0
 
         local sigcgt_hex="" sigcgt=0
         if [[ -r "/proc/$pid/status" ]]; then
@@ -1460,13 +1482,14 @@ _sm_control_reload() {
         fi
         if [[ "$sigcgt_hex" =~ ^[0-9A-Fa-f]+$ ]]; then
             sigcgt=$((16#$sigcgt_hex))
+            sigmask_known=1
         fi
 
         # Signal numbers: HUP=1, CONT=18. In /proc/*/status masks, bit is (signum-1).
-        if (( sigcgt & (1 << 0) )); then
+        if (( sigmask_known == 1 )) && (( sigcgt & (1 << 0) )); then
             sig="HUP"
             catches=1
-        elif (( sigcgt & (1 << 17) )); then
+        elif (( sigmask_known == 1 )) && (( sigcgt & (1 << 17) )); then
             sig="CONT"
             catches=1
         else
@@ -1481,21 +1504,38 @@ _sm_control_reload() {
         fi
 
         if kill -s "$sig" "$pid" 2>/dev/null; then
+            sent_any=1
+
             if (( catches == 1 )); then
-                delivered=1
+                supported_any=1
             else
-                echo "Warning: pid $pid does not appear to handle SIGHUP/SIGCONT; reload may be unsupported for this instance."
+                if (( sigmask_known == 0 )); then
+                    # Common in restricted containers/procfs: SigCgt missing/unreadable.
+                    # We did send the signal; we just can't prove handler masks. Treat as success.
+                    unknown_any=1
+                    supported_any=1
+                else
+                    echo "Warning: pid $pid does not report handlers for SIGHUP or SIGCONT; reload may be unsupported for this instance."
+                fi
             fi
         else
             echo "Warning: failed to send SIG${sig} to pid $pid."
         fi
     done
 
-    if (( delivered == 1 )); then
+    if (( sent_any == 0 )); then
+        echo "Error: failed to send reload signal to any running instance."
+        return 2
+    fi
+
+    if (( supported_any == 1 )); then
+        if (( unknown_any == 1 )); then
+            echo "Note: unable to verify signal handlers via /proc (SigCgt missing/restricted). Reload signal was sent anyway."
+        fi
         return 0
     fi
 
-    echo "Error: reload request was not delivered to any running instance."
+    echo "Error: reload signal was sent, but none of the running instances report handling SIGHUP or SIGCONT (reload likely unsupported)."
     return 2
 }
 
