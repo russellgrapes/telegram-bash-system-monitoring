@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v5.5.1
+#    system-monitoring.sh v5.5.2
 # -----------------------------------
 
 # Telegram Bash System Monitoring (single-file)
@@ -6234,10 +6234,49 @@ validate_thresholds() {
         echo "SSH Login Monitoring: Enabled"
         enabled=1
     fi
+    
     if [[ "${SFTP_LOGIN_MONITORING:-0}" -eq 1 ]]; then
         echo "SFTP Login Monitoring: Enabled"
         enabled=1
     fi
+        # SSH/SFTP excluded IP list (file-based + hardcoded)
+    if [[ "${SSH_LOGIN_MONITORING:-0}" -eq 1 || "${SFTP_LOGIN_MONITORING:-0}" -eq 1 ]]; then
+        echo ""
+        echo "SSH/SFTP Excluded IPs:"
+
+        if [[ -n "${EXCLUDED_IPS_FILE_ACTIVE:-}" ]]; then
+            echo "Excluded IP List File: ${EXCLUDED_IPS_FILE_ACTIVE}"
+        elif [[ ${#SSH_ACTIVITY_EXCLUDED_IPS[@]} -gt 0 ]]; then
+            echo "Excluded IP List File: (none) (using hardcoded list in script)"
+        else
+            echo "Excluded IP List File: (none)"
+            if [[ -n "${EXCLUDED_IPS_DEFAULT_FILE:-}" ]]; then
+                echo "Default Exclude File Path: ${EXCLUDED_IPS_DEFAULT_FILE}"
+            fi
+        fi
+
+        if [[ ${#SSH_ACTIVITY_EXCLUDED_IPS[@]} -eq 0 ]]; then
+            echo "Loaded Excluded IP Entries: none"
+        else
+            local max_show=50
+            local total=${#SSH_ACTIVITY_EXCLUDED_IPS[@]}
+            echo "Loaded Excluded IP Entries: ${total} (showing up to ${max_show})"
+
+            local j=0
+            local ip_entry
+            for ip_entry in "${SSH_ACTIVITY_EXCLUDED_IPS[@]}"; do
+                j=$((j + 1))
+                echo "  [$j] ${ip_entry}"
+                if (( j >= max_show )); then
+                    if (( total > max_show )); then
+                        echo "  ... ($((total - max_show)) more not shown)"
+                    fi
+                    break
+                fi
+            done
+        fi
+    fi
+    
     if [[ "${REBOOT_MONITORING:-0}" -eq 1 ]]; then
         echo "Reboot Monitoring: Enabled"
         enabled=1
