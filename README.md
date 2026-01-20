@@ -53,6 +53,9 @@ If bash monitoring scripts had a flagship phone — this is the Pro model.
   - `--STATUS` / `--RELOAD` / `--KILL` (must be used alone)
 - **Self-checks dependencies** with distro-aware install hints (and can Telegram-notify on startup failures)
 
+### Screenshots
+![alt telegram-bash-system-monitoring](https://github.com/russellgrapes/telegram-bash-system-monitoring/blob/main/placeholder2.png)
+
 ---
 
 ## Quick start
