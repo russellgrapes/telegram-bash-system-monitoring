@@ -138,7 +138,7 @@ print_help() {
     echo "System Monitoring Options:"
     echo "  --NAME host_name              Specifies a custom identifier for the host being monitored."
     echo "  --CPU [CPU_%]                 CPU usage alert threshold (default: 86%)."
-    echo "  --TEMP [TEMP_°C]              CPU temperature alert threshold (default: 65°C)."
+    echo "  --TEMP [TEMP_°C]              CPU temperature alert threshold (default: 85°C)."
     echo "  --RAM [RAM_%]                 RAM usage alert threshold (default: 86%)."
     echo "  --LA1 [threshold]             Sets a custom or auto-threshold (equal to CPU cores) for the 1-minute Load Average."
     echo "  --LA5 [threshold]             Sets a custom or 75% CPU cores auto-threshold for the 5-minute Load Average."
@@ -6031,7 +6031,7 @@ parse_arguments() {
                     --CPU)  default_value=86 ;;
                     --RAM)  default_value=86 ;;
                     --DISK) default_value=90 ;;
-                    --TEMP) default_value=65 ;;
+                    --TEMP) default_value=85 ;;
                 esac
 
                 local value
