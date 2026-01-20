@@ -6,7 +6,7 @@
 # |_________| |_________| |_________|
 #     |||         |||         |||
 # -----------------------------------
-#    system-monitoring.sh v5.5.0
+#    system-monitoring.sh v5.5.1
 # -----------------------------------
 
 # Telegram Bash System Monitoring (single-file)
@@ -2106,26 +2106,50 @@ PY
     fi
     
     # Sanity checks for ping implementation (avoid BusyBox/inetutils incompatibilities).
+    # IMPORTANT: Do NOT require ping to successfully reach localhost here.
+    # Some systems block ICMP on lo, bring lo up late in boot, or run in netns/containers.
+    # We only validate that ping understands the flags we will use (-4/-6/-n/-c/-W)
+    # and that it can open an ICMP socket (permission/capability).
     if [[ "${EXTERNAL_NEED_PING:-0}" -eq 1 && $missing_counter -eq 0 ]]; then
         if command -v ping >/dev/null 2>&1; then
-            # Require the exact flags we rely on: -n -c -W and force IPv4 with -4.
-            # Use localhost so this doesn't depend on external networking.
-            if ! LC_ALL=C ping -4 -n -c 1 -W 1 127.0.0.1 >/dev/null 2>&1; then
+            local ping_bin=""
+            local ping4_out=""
+            local ping6_out=""
+
+            ping_bin="$(command -v ping)"
+
+            # Run a flag sanity check. Exit code may be non-zero for network/policy reasons; that's OK.
+            ping4_out="$(LC_ALL=C "$ping_bin" -4 -n -c 1 -W 1 127.0.0.1 2>&1 || true)"
+
+            # Hard fail: required flags not recognized (typical BusyBox/odd ping variants).
+            if echo "$ping4_out" | grep -qiE 'unknown option|invalid option|illegal option|unrecognized option|bad option'; then
                 echo ""
                 echo "Error: 'ping' on this system is incompatible with ping monitoring."
                 echo "Expected flags: ping -4 -n -c 1 -W 1 <host>"
-                echo "Ping monitoring requires an iputils-style ping (not BusyBox/inetutils)."
+                echo "Detected ping: $ping_bin"
+                echo "Ping monitoring requires a ping that supports -4/-6/-n/-c/-W (iputils recommended)."
                 _install_hint "ping" "$pkg_ping"
-                failed_checks+=("Incompatible 'ping' (missing -4/-n/-c/-W or cannot ping localhost); need iputils ping")
+                failed_checks+=("Incompatible 'ping' (missing -4/-n/-c/-W); need iputils ping")
                 ((missing_counter++))
+
+            # Hard fail: ping exists but cannot open ICMP socket (capability/permission issue).
+            elif echo "$ping4_out" | grep -qiE 'operation not permitted|permission denied|cannot create socket|socket:.*not permitted'; then
+                echo ""
+                echo "Error: 'ping' is present but cannot open an ICMP socket (permission/capability issue)."
+                echo "Detected ping: $ping_bin"
+                echo "Output: $ping4_out"
+                echo "Fix: run as root, or grant CAP_NET_RAW to ping:"
+                echo "  setcap cap_net_raw+ep \"$ping_bin\""
+                failed_checks+=("'ping' cannot open ICMP socket (permission/capability issue)")
+                ((missing_counter++))
+
             else
                 # Verify '-6' is at least recognized (IPv6 itself may still be disabled; that's OK).
-                local ping6_err=""
-                ping6_err="$(LC_ALL=C ping -6 -n -c 1 -W 1 ::1 2>&1 || true)"
-                if echo "$ping6_err" | grep -qiE 'unknown option|invalid option|illegal option|unrecognized option'; then
+                ping6_out="$(LC_ALL=C "$ping_bin" -6 -n -c 1 -W 1 ::1 2>&1 || true)"
+                if echo "$ping6_out" | grep -qiE 'unknown option|invalid option|illegal option|unrecognized option|bad option'; then
                     echo ""
                     echo "Error: 'ping' on this system does not support IPv6 forcing (-6)."
-                    echo "IPv6 ping targets require ping with -6 support (iputils ping)."
+                    echo "IPv6 ping targets require ping with -6 support (iputils recommended)."
                     _install_hint "ping" "$pkg_ping"
                     failed_checks+=("Incompatible 'ping' (no -6 support); need iputils ping for IPv6 targets")
                     ((missing_counter++))
